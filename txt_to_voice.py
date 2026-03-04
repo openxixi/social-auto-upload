@@ -53,6 +53,11 @@ def automate_tts(text_file_path, audio_file_path, output_dir, url="http://localh
         return
     os.makedirs(output_dir, exist_ok=True)
 
+    # Generate output filename from text file
+    text_basename = os.path.splitext(os.path.basename(text_file_path))[0]
+    output_filename = f"{text_basename}.wav"
+    print(f"✓ Will save audio as: {output_filename}")
+
     # Read text from file
     with open(text_file_path, 'r', encoding='utf-8') as f:
         text = f.read().strip()
@@ -193,7 +198,8 @@ def automate_tts(text_file_path, audio_file_path, output_dir, url="http://localh
                 print(f"Output audio {i}: src='{src}'")
 
             # If there is an audio or link, download
-            output_path = os.path.join(output_dir, "generated_audio.wav")
+            output_path = os.path.join(output_dir, output_filename)
+            print(f"\n准备下载音频到: {output_path}")
             src = ready_src
             if not src and audios.count() > 0:
                 for i in range(audios.count()):

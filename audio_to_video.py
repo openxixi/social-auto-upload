@@ -3,6 +3,7 @@ import sys
 import time
 import argparse
 import logging
+import shutil
 from datetime import datetime
 from playwright.sync_api import sync_playwright
 
@@ -22,7 +23,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def audio_to_video(audio_file_path, image_file_path, output_dir, prompt="女人正在说话", url="http://localhost:7860", vram_swap_coef=10):
+def audio_to_video(audio_file_path, image_file_path, output_dir, prompt="女人正在说话", url="http://localhost:7860", vram_swap_coef=10, output_filename="generated_video.mp4"):
     """
     Upload audio and image to localhost:7860 to generate digital human video
     
@@ -32,6 +33,7 @@ def audio_to_video(audio_file_path, image_file_path, output_dir, prompt="女人�
         output_dir: Directory to save the generated video
         prompt: Prompt for the digital human (Chinese description)
         url: URL of the InfiniteTalk service
+        output_filename: Name of the output video file (default: generated_video.mp4)
     """
     start_time = datetime.now()
     logger.info(f"开始时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -365,37 +367,101 @@ def audio_to_video(audio_file_path, image_file_path, output_dir, prompt="女人�
                             # If it's a blob URL, we need to download differently
                             if video_src.startswith("blob:"):
                                 logger.info("Video is a blob URL, attempting to download via page context...")
+                                logger.info(f"Target output filename: {output_filename}")
                                 # Try to trigger download via JavaScript
                                 page.evaluate("""
-                                    (videoElement) => {
+                                    (videoElement, filename) => {
                                         const a = document.createElement('a');
                                         a.href = videoElement.src;
-                                        a.download = 'generated_video.mp4';
+                                        a.download = filename;
                                         document.body.appendChild(a);
                                         a.click();
                                         document.body.removeChild(a);
                                     }
-                                """, video_element.element_handle())
+                                """, video_element.element_handle(), output_filename)
                                 
                                 # Wait for download
                                 try:
                                     with page.expect_download(timeout=30000) as download_info:
                                         pass
                                     download = download_info.value
-                                    output_file = os.path.join(output_dir, download.suggested_filename)
+                                    logger.info(f"Browser suggested filename: {download.suggested_filename}")
+                                    
+                                    # Save to a temporary path first
+                                    temp_path = os.path.join(output_dir, download.suggested_filename)
+                                    output_file = os.path.join(output_dir, output_filename)
+                                    logger.info(f"Downloading to temp: {temp_path}")
+                                    logger.info(f"Will rename to: {output_file}")
+                                    
                                     os.makedirs(output_dir, exist_ok=True)
-                                    download.save_as(output_file)
+                                    
+                                    # Download to temp location
+                                    download.save_as(temp_path)
+                                    logger.info(f"✓ File downloaded to temp location")
+                                    
+                                    # Wait a moment for file handle to be released
+                                    page.wait_for_timeout(500)
+                                    
+                                    # Verify temp file exists
+                                    if not os.path.exists(temp_path):
+                                        logger.error(f"✗ Temp file not found after download: {temp_path}")
+                                        raise FileNotFoundError(f"Downloaded file not found: {temp_path}")
+                                    
+                                    temp_size = os.path.getsize(temp_path)
+                                    logger.info(f"✓ Temp file size: {temp_size} bytes")
+                                    
+                                    # Remove target file if it exists
+                                    if os.path.exists(output_file):
+                                        logger.warning(f"Target file already exists, removing: {output_file}")
+                                        try:
+                                            os.remove(output_file)
+                                        except Exception as del_err:
+                                            logger.warning(f"Could not remove existing file: {del_err}")
+                                    
+                                    # Rename to target filename using shutil.move for better reliability
+                                    logger.info(f"Renaming {os.path.basename(temp_path)} -> {os.path.basename(output_file)}")
+                                    shutil.move(temp_path, output_file)
+                                    
+                                    # Verify rename succeeded
+                                    if not os.path.exists(output_file):
+                                        logger.error(f"✗ Rename failed, target file not found: {output_file}")
+                                        raise FileNotFoundError(f"Renamed file not found: {output_file}")
+                                    
                                     file_size = os.path.getsize(output_file)
-                                    logger.info(f"✓ Downloaded video to: {output_file} ({file_size} bytes)")
+                                    logger.info(f"✓ Successfully renamed and saved video to: {output_file} ({file_size} bytes)")
                                     download_success = True
                                 except Exception as e:
-                                    logger.warning(f"Blob download failed: {e}")
+                                    logger.error(f"✗ Blob download/rename failed: {e}")
+                                    logger.error(f"Download exception details:", exc_info=True)
+                                    
+                                    # Try to salvage: check if temp file was downloaded
+                                    try:
+                                        temp_path = os.path.join(output_dir, download.suggested_filename) if 'download' in locals() else None
+                                        if temp_path and os.path.exists(temp_path):
+                                            logger.warning(f"Attempting to recover: temp file exists at {temp_path}")
+                                            output_file = os.path.join(output_dir, output_filename)
+                                            
+                                            # Remove target if exists
+                                            if os.path.exists(output_file):
+                                                os.remove(output_file)
+                                            
+                                            # Try rename again
+                                            shutil.move(temp_path, output_file)
+                                            
+                                            if os.path.exists(output_file):
+                                                file_size = os.path.getsize(output_file)
+                                                logger.info(f"✓ Recovery successful: {output_file} ({file_size} bytes)")
+                                                download_success = True
+                                    except Exception as recovery_error:
+                                        logger.error(f"Recovery attempt failed: {recovery_error}")
                             else:
                                 # Direct URL, can download using requests or similar
                                 logger.info(f"Direct video URL found, saving to output directory...")
+                                logger.info(f"Target output filename: {output_filename}")
                                 import requests
                                 response = requests.get(video_src)
-                                output_file = os.path.join(output_dir, "generated_video.mp4")
+                                output_file = os.path.join(output_dir, output_filename)
+                                logger.info(f"Saving as: {output_file}")
                                 os.makedirs(output_dir, exist_ok=True)
                                 with open(output_file, 'wb') as f:
                                     f.write(response.content)
@@ -437,7 +503,7 @@ if __name__ == "__main__":
     logger.info("=" * 60)
     
     success = audio_to_video(args.audio_file, args.image_file, args.output_dir, args.prompt, args.url, args.vram_swap_coef)
-    
+        
     logger.info("=" * 60)
     if success:
         logger.info("✓✓✓ SUCCESS! Video generation complete ✓✓✓")

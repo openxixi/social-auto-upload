@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Complete workflow: Text -> TTS Audio -> Digital Human Video
+Complete workflow: Text -> TTS Audio -> Digital Human Video -> Add Subtitles
 """
 import os
 import sys
@@ -9,6 +9,9 @@ import logging
 import socket
 from txt_to_voice import automate_tts
 from audio_to_video import audio_to_video
+from whisper_to_srt import whisper_to_srt
+from correct_subtitle import correct_srt
+from add_subtitle_to_video import add_subtitle_to_video
 
 # Setup logging
 logging.basicConfig(
@@ -65,7 +68,7 @@ def check_service_available(url):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Complete workflow: Text -> TTS Audio -> Digital Human Video",
+        description="Complete workflow: Text -> TTS Audio -> Digital Human Video -> Add Subtitles",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -74,6 +77,9 @@ Examples:
   
   # Generate video with custom prompt
   python workflow.py text_file.txt voice_reference.m4a portrait.jpg output_dir/ --prompt "男人正在说话"
+  
+  # Generate video with subtitles
+  python workflow.py text_file.txt voice_reference.m4a portrait.jpg output_dir/ --prompt "男人正在说话" --add-subtitle
         """
     )
     
@@ -92,6 +98,13 @@ Examples:
         help="Path to an existing audio file to use when --skip-tts is set",
         default=None,
     )
+    
+    # Subtitle options
+    parser.add_argument("--add-subtitle", action="store_true", help="Add subtitles to the video")
+    parser.add_argument("--whisper-model", default="base", help="Whisper model size (tiny/base/small/medium/large)")
+    parser.add_argument("--max-chars", type=int, default=13, help="Maximum characters per subtitle line")
+    parser.add_argument("--subtitle-fontsize", type=int, default=14, help="Subtitle font size")
+    parser.add_argument("--subtitle-fontcolor", default="yellow", help="Subtitle font color")
     
     args = parser.parse_args()
     
@@ -113,11 +126,15 @@ Examples:
     logger.info("TEXT TO VIDEO WORKFLOW")
     logger.info("=" * 60)
     
-    gen_audio = os.path.join(args.output_dir, "generated_audio.wav")
+    # Generate audio filename from text file
+    text_basename = os.path.splitext(os.path.basename(args.text_file))[0]
+    audio_filename = f"{text_basename}.wav"
+    gen_audio = os.path.join(args.output_dir, audio_filename)
     
     # Step 1: Generate TTS audio (if not skipped)
     if not args.skip_tts:
-        logger.info("\n[STEP 1/2] Generating TTS audio from text...")
+        step_label = "[STEP 1/3]" if args.add_subtitle else "[STEP 1/2]"
+        logger.info(f"\n{step_label} Generating TTS audio from text...")
         logger.info("-" * 60)
         logger.info(f"TTS Service URL: {args.tts_url}")
         
@@ -137,7 +154,7 @@ Examples:
             automate_tts(args.text_file, args.audio_reference, args.output_dir, url=args.tts_url)
             
             # Check if audio was generated
-            resolved_audio = find_generated_audio(args.output_dir)
+            resolved_audio = find_generated_audio(args.output_dir, preferred_name=audio_filename)
             if resolved_audio and os.path.exists(resolved_audio):
                 gen_audio = resolved_audio
                 size = os.path.getsize(gen_audio)
@@ -153,14 +170,15 @@ Examples:
             logger.error(f"✗ TTS generation error: {e}", exc_info=True)
             return False
     else:
-        logger.info("\n[STEP 1/2] Skipping TTS generation (--skip-tts)")
+        step_label = "[STEP 1/3]" if args.add_subtitle else "[STEP 1/2]"
+        logger.info(f"\n{step_label} Skipping TTS generation (--skip-tts)")
         logger.info("-" * 60)
         # Priority: explicit --audio-file > output_dir generated audio > audio_reference
         resolved_audio = None
         if args.audio_file:
             resolved_audio = args.audio_file
         else:
-            resolved_audio = find_generated_audio(args.output_dir)
+            resolved_audio = find_generated_audio(args.output_dir, preferred_name=audio_filename)
 
         if not resolved_audio or not os.path.exists(resolved_audio):
             if os.path.exists(args.audio_reference):
@@ -179,7 +197,8 @@ Examples:
         logger.info(f"✓ Using existing audio: {gen_audio} ({size} bytes)")
     
     # Step 2: Generate digital human video
-    logger.info("\n[STEP 2/2] Generating digital human video...")
+    step_label = "[STEP 2/3]" if args.add_subtitle else "[STEP 2/2]"
+    logger.info(f"\n{step_label} Generating digital human video...")
     logger.info("-" * 60)
     logger.info(f"Video Service URL: {args.video_url}")
     
@@ -191,10 +210,15 @@ Examples:
     
     logger.info("✓ Video service is available")
     
+    # Generate output filename from text file
+    text_basename = os.path.splitext(os.path.basename(args.text_file))[0]
+    output_video_filename = f"{text_basename}.mp4"
+    
     try:
         logger.info(f"Audio: {gen_audio}")
         logger.info(f"Image: {args.image_file}")
         logger.info(f"Prompt: {args.prompt}")
+        logger.info(f"Output filename: {output_video_filename}")
         
         success = audio_to_video(
             audio_file_path=gen_audio,
@@ -202,31 +226,131 @@ Examples:
             output_dir=args.output_dir,
             prompt=args.prompt,
             url=args.video_url,
-            vram_swap_coef=args.vram_swap_coef
+            vram_swap_coef=args.vram_swap_coef,
+            output_filename=output_video_filename
         )
         
         if not success:
             logger.error("✗ Video generation failed")
             return False
         
+        # Define video path for subtitle processing
+        video_path = os.path.join(args.output_dir, output_video_filename)
+        
     except Exception as e:
         logger.error(f"✗ Video generation error: {e}", exc_info=True)
         return False
     
+    # Step 3: Add subtitles (if requested)
+    final_video_path = video_path
+    if args.add_subtitle:
+        logger.info("\n[STEP 3/3] Adding subtitles to video...")
+        logger.info("-" * 60)
+        
+        try:
+            # Generate output filenames
+            whisper_srt = os.path.join(args.output_dir, f"{text_basename}_whisper.srt")
+            corrected_srt = os.path.join(args.output_dir, f"{text_basename}_corrected.srt")
+            final_video_filename = f"{text_basename}_字幕.mp4"
+            final_video_path = os.path.join(args.output_dir, final_video_filename)
+            
+            # Step 3.1: Generate subtitle using Whisper
+            logger.info("Step 3.1: Generating subtitles with Whisper...")
+            logger.info(f"Whisper model: {args.whisper_model}")
+            whisper_to_srt(
+                video_file=video_path,
+                output_srt=whisper_srt,
+                model_size=args.whisper_model,
+                language='zh',
+                max_chars=args.max_chars
+            )
+            
+            if os.path.exists(whisper_srt):
+                logger.info(f"✓ Whisper subtitle generated: {whisper_srt}")
+            else:
+                logger.error("✗ Whisper subtitle generation failed")
+                return False
+            
+            # Step 3.2: Correct subtitle using original text
+            logger.info("Step 3.2: Correcting subtitle with original text...")
+            try:
+                correct_srt(
+                    whisper_srt=whisper_srt,
+                    text_file=args.text_file,
+                    output_srt=corrected_srt,
+                    max_chars=args.max_chars
+                )
+                
+                if os.path.exists(corrected_srt):
+                    logger.info(f"✓ Corrected subtitle generated: {corrected_srt}")
+                    subtitle_file = corrected_srt
+                else:
+                    logger.warning("Corrected subtitle not found, using Whisper subtitle")
+                    subtitle_file = whisper_srt
+            except Exception as e:
+                logger.warning(f"Subtitle correction failed: {e}")
+                logger.info("Using Whisper subtitle instead")
+                subtitle_file = whisper_srt
+            
+            # Step 3.3: Add subtitle to video
+            logger.info("Step 3.3: Adding subtitle to video...")
+            logger.info(f"Font size: {args.subtitle_fontsize}")
+            logger.info(f"Font color: {args.subtitle_fontcolor}")
+            
+            add_subtitle_to_video(
+                video_file=video_path,
+                subtitle_file=subtitle_file,
+                output_file=final_video_path,
+                fontsize=args.subtitle_fontsize,
+                fontcolor=args.subtitle_fontcolor
+            )
+            
+            if os.path.exists(final_video_path):
+                size = os.path.getsize(final_video_path)
+                logger.info(f"✓ Subtitle added successfully: {final_video_path} ({size:,} bytes)")
+            else:
+                logger.error("✗ Failed to add subtitle to video")
+                return False
+                
+        except Exception as e:
+            logger.error(f"✗ Subtitle generation error: {e}", exc_info=True)
+            return False
+    
     # Cleanup if not keeping audio
-    if not args.keep_audio and os.path.exists(gen_audio):
-        os.remove(gen_audio)
-        logger.info(f"✓ Cleaned up temporary audio file")
+    should_cleanup_audio = not args.keep_audio and os.path.exists(gen_audio)
     
     logger.info("\n" + "=" * 60)
     logger.info("✓✓✓ WORKFLOW COMPLETE ✓✓✓")
     logger.info("=" * 60)
     logger.info(f"Output directory: {args.output_dir}")
-    logger.info("Generated files:")
-    for f in os.listdir(args.output_dir):
-        fp = os.path.join(args.output_dir, f)
-        size = os.path.getsize(fp)
-        logger.info(f"  - {f} ({size:,} bytes)")
+    logger.info("Generated files in this run:")
+    
+    # Show the specific files we generated
+    audio_path = gen_audio
+    
+    if os.path.exists(audio_path):
+        size = os.path.getsize(audio_path)
+        logger.info(f"  ✓ {os.path.basename(audio_path)} ({size:,} bytes) - Audio")
+    else:
+        logger.warning(f"  ✗ {os.path.basename(audio_path)} - Not found")
+    
+    if os.path.exists(final_video_path):
+        size = os.path.getsize(final_video_path)
+        file_type = "Final Video (with subtitle)" if args.add_subtitle else "Video"
+        logger.info(f"  ✓ {os.path.basename(final_video_path)} ({size:,} bytes) - {file_type}")
+    else:
+        logger.warning(f"  ✗ {os.path.basename(final_video_path)} - Not found")
+        # List all video files in output dir to help debug
+        logger.info("\nAll files in output directory:")
+        for f in sorted(os.listdir(args.output_dir)):
+            fp = os.path.join(args.output_dir, f)
+            if os.path.isfile(fp):
+                size = os.path.getsize(fp)
+                logger.info(f"  - {f} ({size:,} bytes)")
+    
+    if should_cleanup_audio and os.path.exists(gen_audio):
+        os.remove(gen_audio)
+        logger.info(f"\n✓ Cleaned up temporary audio file")
     
     return True
 
