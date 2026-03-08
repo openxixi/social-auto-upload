@@ -12,7 +12,8 @@
 - [🚀 支持的平台](#🚀支持的平台)
 - [💾 安装指南](#💾安装指南)
 - [🏁 快速开始](#🏁快速开始)
-- [🐇 项目背景](#🐇项目背景)
+- [�️ 辅助工具](#🛠️-辅助工具)
+- [�🐇 项目背景](#🐇项目背景)
 - [📃 详细文档](#📃详细文档)
 - [🐾 交流与支持](#🐾交流与支持)
 - [🤝 贡献指南](#🤝贡献指南)
@@ -163,6 +164,103 @@
     ```bash
     python examples/upload_video_to_douyin.py
     ```
+
+## 🛠️ 辅助工具
+
+项目提供了一些实用的辅助工具，帮助您处理视频和文本内容。
+
+### 视频融合工具 (merge_videos.py)
+
+使用 FFmpeg 将两段视频进行融合处理，支持多种融合模式。
+
+**功能特点：**
+- **concat** - 前后拼接（默认）
+- **side** - 左右并排显示
+- **stack** - 上下排列显示
+- **pip** - 画中画效果
+- **blend** - 混合叠加（透明度）
+- **crossfade** - 交叉淡化过渡
+- **cover** - 添加封面图片
+
+**使用示例：**
+
+```bash
+# 前后拼接（最简单）
+python merge_videos.py video1.mp4 video2.mp4
+
+# 左右并排显示
+python merge_videos.py video1.mp4 video2.mp4 --mode side -o output.mp4
+
+# 上下排列
+python merge_videos.py video1.mp4 video2.mp4 --mode stack
+
+# 画中画（右上角）
+python merge_videos.py video1.mp4 video2.mp4 --mode pip
+
+# 画中画（左下角，缩小到25%）
+python merge_videos.py video1.mp4 video2.mp4 --mode pip --position bottom-left --scale 0.25
+
+# 混合叠加
+python merge_videos.py video1.mp4 video2.mp4 --mode blend --opacity 0.6
+
+# 交叉淡化过渡
+python merge_videos.py video1.mp4 video2.mp4 --mode crossfade --duration 2
+
+# 添加封面（在视频开头添加封面图片）
+python merge_videos.py video1.mp4 video2.mp4 --cover cover.jpg
+
+# 自定义封面显示时长（5秒）
+python merge_videos.py video1.mp4 video2.mp4 --cover cover.png --cover-duration 5
+```
+
+**注意：** 需要先安装 FFmpeg 才能使用此工具。
+
+### AI文本改写工具 (ai_rewrite_text.py)
+
+使用 AI 帮助改写/润色文本内容，支持多个 AI 服务提供商。
+
+**支持的 AI 服务：**
+- **Ollama** - 本地部署，完全免费（推荐）
+- **通义千问** - 阿里云服务，有免费额度
+- **Kimi** - Moonshot AI，有免费额度
+- **OpenAI** - GPT系列
+- **Claude** - Anthropic AI
+
+**使用示例：**
+
+```bash
+# 使用 Ollama 本地模型（免费，推荐）
+python ai_rewrite_text.py "这是一段需要改写的文字"
+
+# 从文件读取内容
+python ai_rewrite_text.py --input input.txt
+
+# 自定义改写指令
+python ai_rewrite_text.py --input tmp.txt --instruction "请改写成更正式的商务语言"
+
+# 使用通义千问
+python ai_rewrite_text.py "文本内容" --provider qwen --api-key your_dashscope_key
+
+# 使用 Kimi
+python ai_rewrite_text.py "文本内容" --provider kimi --api-key your_moonshot_key
+
+# 指定输出文件
+python ai_rewrite_text.py "文本内容" --output custom.txt
+```
+
+输出文件会自动命名为 `tmp_日期时间.txt` 格式。
+
+### 生成日期文本工具 (generate_date.py)
+
+快速生成当前日期文本并保存到文件。
+
+**使用方法：**
+
+```bash
+python generate_date.py
+```
+
+生成的文件名为 `data.txt`，内容为当前日期（例如：`2026年3月8日`）。
 
 ## Docker 环境
 ### 自己构建镜像

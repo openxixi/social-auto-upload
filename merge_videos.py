@@ -41,16 +41,103 @@ def check_ffmpeg():
         return False
 
 
-def concat_videos(video1, video2, output, cover=None, cover_duration=3):
+def get_video_info(video_path):
+    """
+    获取视频的详细信息
+    """
+    try:
+        cmd = [
+            'ffprobe',
+            '-v', 'quiet',
+            '-print_format', 'json',
+            '-show_streams',
+            '-show_format',
+            video_path
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            import json
+            data = json.loads(result.stdout)
+            
+            # 获取视频流信息
+            video_stream = None
+            audio_stream = None
+            for stream in data.get('streams', []):
+                if stream.get('codec_type') == 'video' and not video_stream:
+                    video_stream = stream
+                elif stream.get('codec_type') == 'audio' and not audio_stream:
+                    audio_stream = stream
+            
+            if video_stream:
+                info = {
+                    'width': int(video_stream.get('width', 1920)),
+                    'height': int(video_stream.get('height', 1080)),
+                    'fps': eval(video_stream.get('r_frame_rate', '25/1')),
+                    'bit_rate': int(data.get('format', {}).get('bit_rate', 5000000)),
+                    'codec': video_stream.get('codec_name', 'h264'),
+                }
+                
+                if audio_stream:
+                    info['audio_bit_rate'] = int(audio_stream.get('bit_rate', 192000))
+                    info['audio_sample_rate'] = int(audio_stream.get('sample_rate', 44100))
+                else:
+                    info['audio_bit_rate'] = 192000
+                    info['audio_sample_rate'] = 44100
+                
+                return info
+        
+        return None
+    except Exception as e:
+        logger.error(f"获取视频信息失败: {e}")
+        return None
+
+
+def concat_videos(video1, video2, output, cover=None, cover_duration=3, resolution="auto"):
     """
     方式1: 前后拼接两个视频（简单连接）
     如果提供封面，则按照 封面 -> video1 -> video2 的顺序拼接
+    
+    Args:
+        resolution: 输出分辨率，"auto" 表示使用第一个视频的分辨率，或指定如 "1920x1080"
     """
     logger.info("正在拼接视频（前后连接）...")
     
     temp_cover_video = None
     
     try:
+        # 获取第一个视频的信息
+        video_info = get_video_info(video1)
+        
+        if not video_info:
+            logger.error("无法获取视频信息，使用默认参数")
+            video_info = {
+                'width': 1920,
+                'height': 1080,
+                'fps': 25,
+                'bit_rate': 5000000,
+                'audio_bit_rate': 192000,
+                'audio_sample_rate': 44100
+            }
+        
+        # 如果指定了分辨率，使用指定的；否则使用第一个视频的
+        if resolution == "auto":
+            target_width = video_info['width']
+            target_height = video_info['height']
+            logger.info(f"使用第一个视频的分辨率: {target_width}x{target_height}")
+        else:
+            target_width, target_height = resolution.split('x')
+            target_width, target_height = int(target_width), int(target_height)
+            logger.info(f"使用指定分辨率: {target_width}x{target_height}")
+        
+        target_resolution = f"{target_width}:{target_height}"
+        target_fps = int(video_info['fps'])
+        video_bitrate = int(video_info['bit_rate'] / 1000)  # 转换为 kbps
+        audio_bitrate = int(video_info['audio_bit_rate'] / 1000)  # 转换为 kbps
+        audio_sample_rate = video_info['audio_sample_rate']
+        
+        logger.info(f"视频参数: {target_width}x{target_height}, {target_fps}fps, 视频码率:{video_bitrate}k, 音频码率:{audio_bitrate}k")
+        
         # 构建输入参数和filter
         inputs = []
         scale_filters = []
@@ -68,14 +155,14 @@ def concat_videos(video1, video2, output, cover=None, cover_duration=3):
                 '-loop', '1',
                 '-i', cover,
                 '-f', 'lavfi',
-                '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
+                '-i', f'anullsrc=channel_layout=stereo:sample_rate={audio_sample_rate}',
                 '-c:v', 'libx264',
                 '-t', str(cover_duration),
                 '-c:a', 'aac',
                 '-shortest',
                 '-pix_fmt', 'yuv420p',
-                '-r', '25',
-                '-vf', 'scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
+                '-r', str(target_fps),
+                '-vf', f'scale={target_resolution}:force_original_aspect_ratio=increase,crop={target_resolution}',
                 '-y',
                 temp_cover_video
             ]
@@ -94,35 +181,53 @@ def concat_videos(video1, video2, output, cover=None, cover_duration=3):
         
         # 添加视频1
         inputs.extend(['-i', video1])
-        # 将视频1缩放到标准尺寸
-        scale_filters.append(f'[{n}:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25[v{n}]')
+        # 将视频1缩放并裁剪到指定尺寸（填满屏幕）
+        scale_filters.append(f'[{n}:v]scale={target_resolution}:force_original_aspect_ratio=increase,crop={target_resolution},setsar=1,fps={target_fps}[v{n}]')
         concat_inputs.append(f'[v{n}][{n}:a]')
         n += 1
         
         # 添加视频2
         inputs.extend(['-i', video2])
-        # 将视频2缩放到标准尺寸
-        scale_filters.append(f'[{n}:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25[v{n}]')
+        # 将视频2缩放并裁剪到指定尺寸（填满屏幕）
+        scale_filters.append(f'[{n}:v]scale={target_resolution}:force_original_aspect_ratio=increase,crop={target_resolution},setsar=1,fps={target_fps}[v{n}]')
         concat_inputs.append(f'[v{n}][{n}:a]')
         n += 1
         
         # 构建完整的 filter_complex
         filter_complex = ';'.join(scale_filters) + ';' + ''.join(concat_inputs) + f'concat=n={n}:v=1:a=1[outv][outa]'
         
+        # 高质量编码参数（使用第一个视频的参数）
         cmd = [
             'ffmpeg'
         ] + inputs + [
             '-filter_complex', filter_complex,
             '-map', '[outv]',
             '-map', '[outa]',
+            # 视频编码参数
             '-c:v', 'libx264',
+            '-preset', 'slow',           # 编码速度：slow 质量更好
+            '-crf', '18',                # 质量因子：18 高质量
+            '-b:v', f'{video_bitrate}k', # 使用第一个视频的码率
+            '-maxrate', f'{int(video_bitrate * 1.5)}k',
+            '-bufsize', f'{int(video_bitrate * 2)}k',
+            '-profile:v', 'high',
+            '-level', '4.1',
+            '-pix_fmt', 'yuv420p',
+            '-r', str(target_fps),       # 使用第一个视频的帧率
+            # 音频编码参数
             '-c:a', 'aac',
-            '-b:a', '192k',
+            '-b:a', f'{audio_bitrate}k', # 使用第一个视频的音频码率
+            '-ar', str(audio_sample_rate), # 使用第一个视频的采样率
+            # 色彩空间和元数据
+            '-colorspace', 'bt709',
+            '-color_primaries', 'bt709',
+            '-color_trc', 'bt709',
+            '-movflags', '+faststart',
             '-y',
             output
         ]
         
-        logger.info("正在拼接视频（统一分辨率为1920x1080）...")
+        logger.info(f"正在拼接视频（使用第一个视频的参数）...")
         result = subprocess.run(cmd, capture_output=True, text=True)
         
         if result.returncode == 0:
@@ -393,14 +498,26 @@ def main():
   # 添加封面（在视频开头添加封面图片）
   python merge_videos.py video1.mp4 video2.mp4 -o output.mp4 --cover cover.jpg
   python merge_videos.py video1.mp4 video2.mp4 -o output.mp4 --cover cover.png --cover-duration 5
+  
+  # 使用第一个视频的分辨率和参数（默认，自动匹配）
+  python merge_videos.py video1.mp4 video2.mp4
+  
+  # 指定输出分辨率（1080p横屏）
+  python merge_videos.py video1.mp4 video2.mp4 --resolution 1920x1080
+  
+  # 指定输出分辨率（1080p竖屏，抖音常用）
+  python merge_videos.py video1.mp4 video2.mp4 --resolution 1080x1920 --cover cover.jpg
+  
+  # 指定输出分辨率（720p）
+  python merge_videos.py video1.mp4 video2.mp4 --resolution 1280x720
         """
     )
     
     parser.add_argument("video1", help="第一个视频文件")
     parser.add_argument("video2", help="第二个视频文件")
     
-    # 生成默认输出文件名
-    default_output = f"merged_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+    # 默认输出文件名
+    default_output = "tmp.mp4"
     parser.add_argument("--output", "-o", default=default_output,
                         help=f"输出文件路径（默认: {default_output}）")
     
@@ -436,6 +553,12 @@ def main():
     parser.add_argument("--cover-duration", type=float, default=0.5,
                         help="封面显示时长（秒）（默认0.5秒）")
     
+    # 分辨率参数
+    parser.add_argument("--resolution", "-r",
+                        choices=["auto", "1920x1080", "1280x720", "1080x1920", "720x1280", "3840x2160"],
+                        default="auto",
+                        help="输出视频分辨率（auto=使用第一个视频的分辨率(默认), 1920x1080=1080p横屏, 1080x1920=1080p竖屏, 1280x720=720p, 3840x2160=4K）")
+    
     args = parser.parse_args()
     
     # 检查输入文件
@@ -469,7 +592,7 @@ def main():
     if args.mode == "concat":
         # concat模式支持直接添加封面
         success = concat_videos(args.video1, args.video2, args.output, 
-                               args.cover, args.cover_duration)
+                               args.cover, args.cover_duration, args.resolution)
     elif args.mode == "side":
         success = side_by_side_videos(args.video1, args.video2, args.output)
     elif args.mode == "stack":

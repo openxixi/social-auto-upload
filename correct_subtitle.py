@@ -171,22 +171,36 @@ def split_text_by_timestamps(text, timestamps, max_chars=15):
     return segments
 
 
-def split_long_line(text, max_length=15):
+def split_long_line(text, max_length=9):
     """将长文本分成两行"""
     if len(text) <= max_length:
         return text
+    
+    # 定义标点符号优先级（强标点优先于弱标点）
+    strong_punctuation = set('。.！!？?；;')
+    weak_punctuation = set('，,、')
     
     # 尝试在标点符号处分行
     half = len(text) // 2
     best_pos = None
     best_distance = float('inf')
     
+    # 先找强标点符号
     for i in range(len(text)):
-        if text[i] in '，,、；;！!？?。.':
+        if text[i] in strong_punctuation:
             distance = abs(i + 1 - half)
             if distance < best_distance and distance < len(text) * 0.4:
                 best_distance = distance
                 best_pos = i + 1
+    
+    # 如果没有强标点，再找弱标点
+    if not best_pos:
+        for i in range(len(text)):
+            if text[i] in weak_punctuation:
+                distance = abs(i + 1 - half)
+                if distance < best_distance and distance < len(text) * 0.4:
+                    best_distance = distance
+                    best_pos = i + 1
     
     if best_pos:
         return text[:best_pos] + '\n' + text[best_pos:]
@@ -195,7 +209,7 @@ def split_long_line(text, max_length=15):
     return text[:half] + '\n' + text[half:]
 
 
-def correct_srt(whisper_srt, text_file, output_srt=None, max_chars=15):
+def correct_srt(whisper_srt, text_file, output_srt=None, max_chars=9):
     """
     根据Whisper的时间戳和原文本生成矫正后的字幕
     
@@ -221,7 +235,7 @@ def correct_srt(whisper_srt, text_file, output_srt=None, max_chars=15):
     if not timestamps:
         return False
     
-    # 根据Whisper识别的字符数比例分配原文本（每行最多15字）
+    # 根据Whisper识别的字符数比例分配原文本（每行最多9字）
     segments = split_text_by_timestamps(text, timestamps, max_chars=max_chars)
     logger.info(f"✓ 文本分割完成，共 {len(segments)} 句")
     

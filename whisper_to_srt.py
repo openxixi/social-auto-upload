@@ -83,15 +83,21 @@ def transcribe_audio(audio_file, model_size='base', language='zh'):
         return None
 
 
-def merge_segments(segments, max_chars=15, max_duration=5.0):
+def merge_segments(segments, max_chars=9, max_duration=3.0):
     """
     合并短片段，确保每句不超过max_chars个字
+    优先在标点符号处断句，生成更短更精确的字幕
     
     参数:
         segments: Whisper返回的片段列表
-        max_chars: 每句最大字符数
-        max_duration: 每句最大时长（秒）
+        max_chars: 每句最大字符数（默认9个字）
+        max_duration: 每句最大时长（秒，默认3秒）
     """
+    # 强断句标点（遇到这些立即分句）
+    strong_punctuation = {'。', '.', '！', '!', '？', '?', '；', ';'}
+    # 弱断句标点（可以考虑分句）
+    weak_punctuation = {'，', ',', '、'}
+    
     merged = []
     current = {
         'start': None,
@@ -109,22 +115,52 @@ def merge_segments(segments, max_chars=15, max_duration=5.0):
             current['start'] = seg['start']
             current['end'] = seg['end']
             current['text'] = text
+            
+            # 检查是否以强标点结尾，如果是就不合并
+            if text and text[-1] in strong_punctuation:
+                merged.append(current.copy())
+                current = {'start': None, 'end': None, 'text': ''}
         else:
             # 检查是否可以合并
             new_text = current['text'] + text
             duration = seg['end'] - current['start']
             
-            if len(new_text) <= max_chars and duration <= max_duration:
-                # 可以合并
-                current['text'] = new_text
-                current['end'] = seg['end']
-            else:
+            # 检查当前文本是否以强标点结尾
+            ends_with_strong = current['text'] and current['text'][-1] in strong_punctuation
+            
+            # 判断是否应该分句：
+            # 1. 遇到强标点必须分句
+            # 2. 超过最大字符数
+            # 3. 超过最大时长
+            # 4. 当前有弱标点且新文本会超过70%的max_chars
+            should_break = (
+                ends_with_strong or
+                len(new_text) > max_chars or
+                duration > max_duration or
+                (current['text'] and current['text'][-1] in weak_punctuation and len(new_text) > max_chars * 0.7)
+            )
+            
+            if should_break:
                 # 不能合并，保存当前并开始新的
                 if current['text']:
                     merged.append(current.copy())
                 current['start'] = seg['start']
                 current['end'] = seg['end']
                 current['text'] = text
+                
+                # 检查新片段是否以强标点结尾
+                if text and text[-1] in strong_punctuation:
+                    merged.append(current.copy())
+                    current = {'start': None, 'end': None, 'text': ''}
+            else:
+                # 可以合并
+                current['text'] = new_text
+                current['end'] = seg['end']
+                
+                # 合并后检查是否以强标点结尾
+                if current['text'] and current['text'][-1] in strong_punctuation:
+                    merged.append(current.copy())
+                    current = {'start': None, 'end': None, 'text': ''}
     
     # 添加最后一个片段
     if current['text']:
@@ -133,22 +169,35 @@ def merge_segments(segments, max_chars=15, max_duration=5.0):
     return merged
 
 
-def split_long_text(text, max_length=15):
-    """将长文本分成两行"""
+def split_long_text(text, max_length=9):
+    """将长文本分成两行，优先在标点符号处分割"""
     if len(text) <= max_length:
         return text
     
-    # 尝试在标点符号处分行
+    # 尝试在标点符号处分行（优先强标点）
+    strong_punctuation = '。.！!？?；;'
+    weak_punctuation = '，,、'
+    
     half = len(text) // 2
     best_pos = None
     best_distance = float('inf')
     
+    # 先找强标点
     for i in range(len(text)):
-        if text[i] in '，,、；;！!？?。.':
+        if text[i] in strong_punctuation:
             distance = abs(i + 1 - half)
             if distance < best_distance and distance < len(text) * 0.4:
                 best_distance = distance
                 best_pos = i + 1
+    
+    # 如果没找到强标点，找弱标点
+    if best_pos is None:
+        for i in range(len(text)):
+            if text[i] in weak_punctuation:
+                distance = abs(i + 1 - half)
+                if distance < best_distance and distance < len(text) * 0.4:
+                    best_distance = distance
+                    best_pos = i + 1
     
     if best_pos:
         return text[:best_pos] + '\n' + text[best_pos:]
@@ -157,7 +206,7 @@ def split_long_text(text, max_length=15):
     return text[:half] + '\n' + text[half:]
 
 
-def create_srt(segments, max_chars=15):
+def create_srt(segments, max_chars=9):
     """生成SRT字幕内容"""
     srt_lines = []
     
@@ -173,7 +222,7 @@ def create_srt(segments, max_chars=15):
 
 
 def whisper_to_srt(video_file, output_srt=None, model_size='base', 
-                   language='zh', max_chars=15, max_duration=5.0):
+                   language='zh', max_chars=9, max_duration=3.0):
     """
     使用Whisper从视频生成SRT字幕
     

@@ -20,7 +20,7 @@ Write-Host "步骤1: 使用Whisper识别语音并生成字幕"
 Write-Host "========================================"
 
 # 执行Whisper字幕生成
-& python ".\whisper_to_srt.py" $VIDEO_FILE -o $WHISPER_SRT --model base --language zh --max-chars 13
+& python ".\whisper_to_srt.py" $VIDEO_FILE -o $WHISPER_SRT --model base --language zh --max-chars 9
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -35,7 +35,7 @@ Write-Host "步骤2: 使用原文本矫正字幕"
 Write-Host "========================================"
 
 # 使用原文本矫正字幕
-& python ".\correct_subtitle.py" $WHISPER_SRT $TEXT_FILE -o $CORRECTED_SRT --max-chars 13
+& python ".\correct_subtitle.py" $WHISPER_SRT $TEXT_FILE -o $CORRECTED_SRT --max-chars 9
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""

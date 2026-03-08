@@ -325,8 +325,11 @@ def audio_to_video(audio_file_path, image_file_path, output_dir, prompt="女人�
                             output_file = os.path.join(output_dir, download.suggested_filename)
                             os.makedirs(output_dir, exist_ok=True)
                             download.save_as(output_file)
+                            
                             file_size = os.path.getsize(output_file)
                             logger.info(f"✓ Downloaded video to: {output_file} ({file_size} bytes)")
+                            os.rename(output_file, os.path.join(output_dir, output_filename))
+                            logger.info(f"✓ Renamed to: {output_filename}")
                             download_success = True
                         except Exception as e:
                             logger.warning(f"Download via icon/link failed: {e}")
@@ -350,6 +353,8 @@ def audio_to_video(audio_file_path, image_file_path, output_dir, prompt="女人�
                                 download.save_as(output_file)
                                 file_size = os.path.getsize(output_file)
                                 logger.info(f"✓ Downloaded video to: {output_file} ({file_size} bytes)")
+                                os.rename(output_file, os.path.join(output_dir, output_filename))
+                                logger.info(f"✓ Renamed to: {output_filename}")
                                 download_success = True
                                 break
                             except Exception as e:
@@ -467,6 +472,8 @@ def audio_to_video(audio_file_path, image_file_path, output_dir, prompt="女人�
                                     f.write(response.content)
                                 file_size = os.path.getsize(output_file)
                                 logger.info(f"✓ Downloaded video to: {output_file} ({file_size} bytes)")
+                                os.rename(output_file, os.path.join(output_dir, output_filename))
+                                logger.info(f"✓ Renamed to: {output_filename}")
                                 download_success = True
                     except Exception as e:
                         logger.error(f"Failed to extract and download video: {e}", exc_info=True)
