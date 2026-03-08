@@ -100,7 +100,7 @@ Examples:
     )
     
     # Subtitle options
-    parser.add_argument("--add-subtitle", action="store_true", help="Add subtitles to the video")
+    parser.add_argument("--no-subtitle", action="store_true", help="Skip adding subtitles to the video (subtitles are added by default)")
     parser.add_argument("--whisper-model", default="base", help="Whisper model size (tiny/base/small/medium/large)")
     parser.add_argument("--max-chars", type=int, default=13, help="Maximum characters per subtitle line")
     parser.add_argument("--subtitle-fontsize", type=int, default=14, help="Subtitle font size")
@@ -133,7 +133,7 @@ Examples:
     
     # Step 1: Generate TTS audio (if not skipped)
     if not args.skip_tts:
-        step_label = "[STEP 1/3]" if args.add_subtitle else "[STEP 1/2]"
+        step_label = "[STEP 1/3]" if not args.no_subtitle else "[STEP 1/2]"
         logger.info(f"\n{step_label} Generating TTS audio from text...")
         logger.info("-" * 60)
         logger.info(f"TTS Service URL: {args.tts_url}")
@@ -170,7 +170,7 @@ Examples:
             logger.error(f"✗ TTS generation error: {e}", exc_info=True)
             return False
     else:
-        step_label = "[STEP 1/3]" if args.add_subtitle else "[STEP 1/2]"
+        step_label = "[STEP 1/3]" if not args.no_subtitle else "[STEP 1/2]"
         logger.info(f"\n{step_label} Skipping TTS generation (--skip-tts)")
         logger.info("-" * 60)
         # Priority: explicit --audio-file > output_dir generated audio > audio_reference
@@ -197,7 +197,7 @@ Examples:
         logger.info(f"✓ Using existing audio: {gen_audio} ({size} bytes)")
     
     # Step 2: Generate digital human video
-    step_label = "[STEP 2/3]" if args.add_subtitle else "[STEP 2/2]"
+    step_label = "[STEP 2/3]" if not args.no_subtitle else "[STEP 2/2]"
     logger.info(f"\n{step_label} Generating digital human video...")
     logger.info("-" * 60)
     logger.info(f"Video Service URL: {args.video_url}")
@@ -241,9 +241,9 @@ Examples:
         logger.error(f"✗ Video generation error: {e}", exc_info=True)
         return False
     
-    # Step 3: Add subtitles (if requested)
+    # Step 3: Add subtitles (enabled by default)
     final_video_path = video_path
-    if args.add_subtitle:
+    if not args.no_subtitle:
         logger.info("\n[STEP 3/3] Adding subtitles to video...")
         logger.info("-" * 60)
         
@@ -336,7 +336,7 @@ Examples:
     
     if os.path.exists(final_video_path):
         size = os.path.getsize(final_video_path)
-        file_type = "Final Video (with subtitle)" if args.add_subtitle else "Video"
+        file_type = "Final Video (with subtitle)" if not args.no_subtitle else "Video"
         logger.info(f"  ✓ {os.path.basename(final_video_path)} ({size:,} bytes) - {file_type}")
     else:
         logger.warning(f"  ✗ {os.path.basename(final_video_path)} - Not found")

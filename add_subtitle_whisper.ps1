@@ -7,10 +7,10 @@ $PSDefaultParameterValues['*:Encoding'] = 'utf8'
 Set-Location -Path $PSScriptRoot
 
 # 定义文件路径
-$VIDEO_FILE = ".\output_video\WanVideo2_1_InfiniteTalk_00001-audio.mp4_1770038377.mp4_trim.mp4"
-$TEXT_FILE = "D:\video_workspace\source_txt\2_我要做什么.txt"
-$WHISPER_SRT = ".\output_video\whisper_字幕.srt"
-$CORRECTED_SRT = ".\output_video\corrected_字幕.srt"
+$VIDEO_FILE = ".\output_video\4_替天行道.mp4"
+$TEXT_FILE = "D:\video_workspace\source_txt\4_替天行道.txt"
+$WHISPER_SRT = ".\output_video\4_替天行道.srt"
+$CORRECTED_SRT = ".\output_video\4_替天行道_corrected.srt"
 
 Write-Host "========================================"
 Write-Host "Whisper AI字幕生成工具"
@@ -20,7 +20,7 @@ Write-Host "步骤1: 使用Whisper识别语音并生成字幕"
 Write-Host "========================================"
 
 # 执行Whisper字幕生成
-& ".\.venv\Scripts\python.exe" ".\whisper_to_srt.py" $VIDEO_FILE -o $WHISPER_SRT --model base --language zh --max-chars 13
+& python ".\whisper_to_srt.py" $VIDEO_FILE -o $WHISPER_SRT --model base --language zh --max-chars 13
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -35,7 +35,7 @@ Write-Host "步骤2: 使用原文本矫正字幕"
 Write-Host "========================================"
 
 # 使用原文本矫正字幕
-& ".\.venv\Scripts\python.exe" ".\correct_subtitle.py" $WHISPER_SRT $TEXT_FILE -o $CORRECTED_SRT --max-chars 13
+& python ".\correct_subtitle.py" $WHISPER_SRT $TEXT_FILE -o $CORRECTED_SRT --max-chars 13
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -50,7 +50,7 @@ Write-Host "========================================"
 Write-Host ""
 
 # 执行字幕添加
-& ".\.venv\Scripts\python.exe" ".\add_subtitle_to_video.py" $VIDEO_FILE $CORRECTED_SRT -o ".\output_video\最终视频.mp4" --fontsize 14 --fontcolor yellow
+& python ".\add_subtitle_to_video.py" $VIDEO_FILE $CORRECTED_SRT -o ".\output_video\最终视频.mp4" --fontsize 14 --fontcolor yellow
 
 Write-Host ""
 Write-Host "========================================"
