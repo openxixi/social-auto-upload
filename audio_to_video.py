@@ -219,7 +219,7 @@ def audio_to_video(audio_file_path, image_file_path, output_dir, prompt="女人�
             logger.info("\n✓ Waiting for video generation (this may take several minutes)...")
             
             # Poll for results
-            max_wait = 7200  # 2 hours maximum
+            max_wait = 7200 * 4  # 8 hours maximum
             poll_interval = 10  # Check every 10 seconds
             elapsed = 0
             

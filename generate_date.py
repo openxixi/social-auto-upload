@@ -13,7 +13,7 @@ now = datetime.now()
 date_text = f"{now.year}年{now.month}月{now.day}日"
 
 # 写入txt文件
-output_file = "data.txt"
+output_file = ".\output_video\date.txt"
 with open(output_file, 'w', encoding='utf-8') as f:
     f.write(date_text)
 

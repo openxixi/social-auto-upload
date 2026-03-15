@@ -14,18 +14,25 @@ if __name__ == '__main__':
     # 获取文件夹中的所有文件
     files = list(folder_path.glob("*.mp4"))
     file_num = len(files)
-    publish_datetimes = generate_schedule_time_next_day(file_num, 1, daily_times=[16])
+    publish_datetimes = generate_schedule_time_next_day(file_num, 1, daily_times=[8], timestamps=False, start_days=-1)
     cookie_setup = asyncio.run(douyin_setup(account_file, handle=False))
     for index, file in enumerate(files):
         title, tags = get_title_and_hashtags(str(file))
+        # 查找封面文件（优先png，其次jpg）
         thumbnail_path = file.with_suffix('.png')
+        if not thumbnail_path.exists():
+            thumbnail_path = file.with_suffix('.jpg')
+        
         # 打印视频文件名、标题和 hashtag
         print(f"视频文件名：{file}")
         print(f"标题：{title}")
         print(f"Hashtag：{tags}")
-        # 暂时没有时间修复封面上传，故先隐藏掉该功能
-        # if thumbnail_path.exists():
-            # app = DouYinVideo(title, file, tags, publish_datetimes[index], account_file, thumbnail_path=thumbnail_path)
-        # else:
-        app = DouYinVideo(title, file, tags, publish_datetimes[index], account_file)
+        
+        # 如果有封面文件，则使用
+        if thumbnail_path.exists():
+            print(f"封面文件：{thumbnail_path}")
+            app = DouYinVideo(title, file, tags, publish_datetimes[index], account_file, thumbnail_path=thumbnail_path)
+        else:
+            print("未找到封面文件，将自动从视频提取")
+            app = DouYinVideo(title, file, tags, publish_datetimes[index], account_file)
         asyncio.run(app.main(), debug=False)

@@ -41,6 +41,47 @@ def check_ffmpeg():
         return False
 
 
+def get_video_volume(video_path):
+    """
+    获取视频的平均音量
+    """
+    try:
+        cmd = [
+            'ffmpeg',
+            '-i', video_path,
+            '-af', 'volumedetect',
+            '-vn',
+            '-sn',
+            '-dn',
+            '-f', 'null',
+            '-'
+        ]
+        
+        # ffmpeg 的 volumedetect 输出在 stderr 中
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        # volumedetect 的输出在 stderr 中
+        output = result.stderr
+        
+        # 从输出中提取平均音量
+        for line in output.split('\n'):
+            if 'mean_volume' in line:
+                # 示例: mean_volume: -20.5 dB
+                parts = line.split(':')
+                if len(parts) >= 2:
+                    volume_str = parts[1].strip().split()[0]
+                    try:
+                        return float(volume_str)
+                    except:
+                        pass
+        
+        logger.warning(f"无法从输出中提取音量信息: {video_path}")
+        return None
+    except Exception as e:
+        logger.error(f"获取音量失败: {e}")
+        return None
+
+
 def get_video_info(video_path):
     """
     获取视频的详细信息
@@ -138,9 +179,37 @@ def concat_videos(video1, video2, output, cover=None, cover_duration=3, resoluti
         
         logger.info(f"视频参数: {target_width}x{target_height}, {target_fps}fps, 视频码率:{video_bitrate}k, 音频码率:{audio_bitrate}k")
         
+        # 获取两个视频的音量，用于音量匹配
+        logger.info("正在分析视频音量...")
+        volume1 = get_video_volume(video1)
+        volume2 = get_video_volume(video2)
+        
+        volume_adjustment1 = 0  # 视频1的音量调整
+        volume_adjustment2 = 0  # 视频2的音量调整
+        
+        if volume1 is not None and volume2 is not None:
+            logger.info(f"视频1平均音量: {volume1:.1f} dB")
+            logger.info(f"视频2平均音量: {volume2:.1f} dB")
+            
+            # 找出音量更大的（分贝更高的，注意-14 > -33.7）
+            target_volume = max(volume1, volume2)
+            logger.info(f"目标音量（以更大的为准）: {target_volume:.1f} dB")
+            
+            # 计算每个视频需要调整的音量
+            volume_adjustment1 = target_volume - volume1
+            volume_adjustment2 = target_volume - volume2
+            
+            if abs(volume_adjustment1) > 0.5:
+                logger.info(f"将视频1音量调整: {volume_adjustment1:+.1f} dB")
+            if abs(volume_adjustment2) > 0.5:
+                logger.info(f"将视频2音量调整: {volume_adjustment2:+.1f} dB")
+        else:
+            logger.warning("无法获取音量信息，不进行音量调整")
+        
         # 构建输入参数和filter
         inputs = []
         scale_filters = []
+        audio_filters = []
         concat_inputs = []
         n = 0
         
@@ -175,7 +244,8 @@ def concat_videos(video1, video2, output, cover=None, cover_duration=3, resoluti
             inputs.extend(['-i', temp_cover_video])
             # 封面已经是标准尺寸，直接使用
             scale_filters.append(f'[{n}:v]setsar=1[v{n}]')
-            concat_inputs.append(f'[v{n}][{n}:a]')
+            audio_filters.append(f'[{n}:a]anull[a{n}]')  # 封面音频（静音）
+            concat_inputs.append(f'[v{n}][a{n}]')
             n += 1
             logger.info("✓ 封面处理完成")
         
@@ -183,18 +253,29 @@ def concat_videos(video1, video2, output, cover=None, cover_duration=3, resoluti
         inputs.extend(['-i', video1])
         # 将视频1缩放并裁剪到指定尺寸（填满屏幕）
         scale_filters.append(f'[{n}:v]scale={target_resolution}:force_original_aspect_ratio=increase,crop={target_resolution},setsar=1,fps={target_fps}[v{n}]')
-        concat_inputs.append(f'[v{n}][{n}:a]')
+        # 调整视频1的音量（如果需要）
+        if abs(volume_adjustment1) > 0.5:  # 只有差异大于0.5dB时才调整
+            audio_filters.append(f'[{n}:a]volume={volume_adjustment1}dB[a{n}]')
+        else:
+            audio_filters.append(f'[{n}:a]anull[a{n}]')  # 差异很小，不调整
+        concat_inputs.append(f'[v{n}][a{n}]')
         n += 1
         
         # 添加视频2
         inputs.extend(['-i', video2])
         # 将视频2缩放并裁剪到指定尺寸（填满屏幕）
         scale_filters.append(f'[{n}:v]scale={target_resolution}:force_original_aspect_ratio=increase,crop={target_resolution},setsar=1,fps={target_fps}[v{n}]')
-        concat_inputs.append(f'[v{n}][{n}:a]')
+        # 调整视频2的音量（如果需要）
+        if abs(volume_adjustment2) > 0.5:  # 只有差异大于0.5dB时才调整
+            audio_filters.append(f'[{n}:a]volume={volume_adjustment2}dB[a{n}]')
+        else:
+            audio_filters.append(f'[{n}:a]anull[a{n}]')  # 差异很小，不调整
+        concat_inputs.append(f'[v{n}][a{n}]')
         n += 1
         
         # 构建完整的 filter_complex
-        filter_complex = ';'.join(scale_filters) + ';' + ''.join(concat_inputs) + f'concat=n={n}:v=1:a=1[outv][outa]'
+        all_filters = scale_filters + audio_filters
+        filter_complex = ';'.join(all_filters) + ';' + ''.join(concat_inputs) + f'concat=n={n}:v=1:a=1[outv][outa]'
         
         # 高质量编码参数（使用第一个视频的参数）
         cmd = [

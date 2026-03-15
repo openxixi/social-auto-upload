@@ -8,6 +8,7 @@ import asyncio
 from conf import LOCAL_CHROME_PATH, LOCAL_CHROME_HEADLESS
 from utils.base_social_media import set_init_script
 from utils.log import douyin_logger
+from utils.video_utils import extract_video_frame
 
 
 async def cookie_auth(account_file):
@@ -114,6 +115,21 @@ class DouYinVideo(object):
         douyin_logger.info(f'[+]正在上传-------{self.title}.mp4')
         # 等待页面跳转到指定的 URL，没进入，则自动等待到超时
         douyin_logger.info(f'[-] 正在打开主页...')
+        
+        # 处理可能出现的位置权限弹窗
+        try:
+            await asyncio.sleep(2)  # 等待弹窗出现
+            # 尝试多种方式查找并点击"一律不允许"按钮
+            deny_button = page.locator("button:has-text('一律不允许')")
+            if await deny_button.count() > 0:
+                await deny_button.first.click()
+                douyin_logger.info("  [-] 已关闭位置权限弹窗")
+                await asyncio.sleep(1)
+            else:
+                douyin_logger.debug("  [-] 未检测到位置权限弹窗")
+        except Exception as e:
+            douyin_logger.debug(f"  [-] 位置权限弹窗处理异常: {e}")
+        
         await page.wait_for_url("https://creator.douyin.com/creator-micro/content/upload")
         # 点击 "上传视频" 按钮
         await page.locator("div[class^='container'] input").set_input_files(self.file_path)
@@ -138,6 +154,19 @@ class DouYinVideo(object):
                 except:
                     print("  [-] 超时未进入视频发布页面，重新尝试...")
                     await asyncio.sleep(0.5)  # 等待 0.5 秒后重新尝试
+        
+        # 处理可能出现的新功能通知弹窗
+        try:
+            await asyncio.sleep(1)  # 等待弹窗出现
+            # 查找"我知道了"按钮并点击
+            know_button = page.locator("button:has-text('我知道了')")
+            if await know_button.count() > 0 and await know_button.is_visible():
+                await know_button.click()
+                douyin_logger.debug("  [-] 已关闭新功能通知弹窗")
+                await asyncio.sleep(0.5)
+        except Exception as e:
+            douyin_logger.debug(f"  [-] 未检测到新功能通知弹窗")
+        
         # 填充标题和话题
         # 检查是否存在包含输入框的元素
         # 这里为了避免页面变化，故使用相对位置定位：作品标题父级右侧第一个元素的input子元素
@@ -202,7 +231,11 @@ class DouYinVideo(object):
             await self.set_schedule_time_douyin(page, self.publish_date)
 
         # 判断视频是否发布成功
-        while True:
+        max_retries = 10
+        retry_count = 0
+        cover_handled = False  # 标记封面是否已处理
+        
+        while retry_count < max_retries:
             # 判断视频是否发布成功
             try:
                 publish_button = page.get_by_role('button', name="发布", exact=True)
@@ -213,11 +246,22 @@ class DouYinVideo(object):
                 douyin_logger.success("  [-]视频发布成功")
                 break
             except:
-                # 尝试处理封面问题
-                await self.handle_auto_video_cover(page)
-                douyin_logger.info("  [-] 视频正在发布中...")
+                retry_count += 1
+                douyin_logger.info(f"  [-] 视频正在发布中... (尝试 {retry_count}/{max_retries})")
+                
+                # 只在前几次尝试处理封面问题
+                if not cover_handled and retry_count <= 3:
+                    cover_result = await self.handle_auto_video_cover(page)
+                    if cover_result:
+                        cover_handled = True
+                        douyin_logger.success("  [+] 封面已成功设置")
+                
                 await page.screenshot(full_page=True)
                 await asyncio.sleep(0.5)
+                
+                if retry_count >= max_retries:
+                    douyin_logger.error(f"  [-] 发布失败，已达到最大重试次数 {max_retries}")
+                    raise Exception(f"视频发布失败，重试{max_retries}次后仍未成功")
 
         await context.storage_state(path=self.account_file)  # 保存cookie
         douyin_logger.success('  [-]cookie更新完毕！')
@@ -228,58 +272,207 @@ class DouYinVideo(object):
 
     async def handle_auto_video_cover(self, page):
         """
-        处理必须设置封面的情况，点击推荐封面的第一个
+        处理必须设置封面的情况，从视频提取封面并上传
         """
         # 1. 判断是否出现 "请设置封面后再发布" 的提示
         # 必须确保提示是可见的 (is_visible)，因为 DOM 中可能存在隐藏的历史提示
         if await page.get_by_text("请设置封面后再发布").first.is_visible():
-            print("  [-] 检测到需要设置封面提示...")
+            douyin_logger.info("  [-] 检测到需要设置封面提示，将从视频提取封面...")
 
-            # 2. 定位“智能推荐封面”区域下的第一个封面
-            # 使用 class^= 前缀匹配，避免 hash 变化导致失效
-            recommend_cover = page.locator('[class^="recommendCover-"]').first
-
-            if await recommend_cover.count():
-                print("  [-] 正在选择第一个推荐封面...")
+            try:
+                # 从视频中提取封面
+                cover_path = extract_video_frame(self.file_path, time="00:00:01")
+                douyin_logger.info(f"  [-] 封面提取成功: {cover_path}")
+                
+                # 上传封面
+                await self.set_thumbnail(page, cover_path)
+                douyin_logger.success("  [+] 封面上传成功")
+                
+                # 清理临时封面文件
                 try:
-                    await recommend_cover.click()
-                    await asyncio.sleep(1)  # 等待选中生效
-
-                    # 3. 处理可能的确认弹窗 "是否确认应用此封面？"
-                    # 并不一定每次都会出现，健壮性判断：如果出现弹窗，则点击确定
-                    confirm_text = "是否确认应用此封面？"
-                    if await page.get_by_text(confirm_text).first.is_visible():
-                        print(f"  [-] 检测到确认弹窗: {confirm_text}")
-                        # 直接点击“确定”按钮，不依赖脆弱的 CSS 类名
-                        await page.get_by_role("button", name="确定").click()
-                        print("  [-] 已点击确认应用封面")
-                        await asyncio.sleep(1)
-
-                    print("  [-] 已完成封面选择流程")
-                    return True
+                    if os.path.exists(cover_path):
+                        os.remove(cover_path)
+                        douyin_logger.debug(f"  [-] 已清理临时封面文件: {cover_path}")
                 except Exception as e:
-                    print(f"  [-] 选择封面失败: {e}")
+                    douyin_logger.warning(f"  [-] 清理临时文件失败: {e}")
+                
+                return True
+            except Exception as e:
+                douyin_logger.error(f"  [-] 提取并上传封面失败: {e}")
+                # 如果提取失败，尝试原来的方法：点击推荐封面
+                douyin_logger.info("  [-] 尝试使用备用方案：点击推荐封面...")
+                
+                recommend_cover = page.locator('[class^="recommendCover-"]').first
+                if await recommend_cover.count():
+                    print("  [-] 正在选择第一个推荐封面...")
+                    try:
+                        await recommend_cover.click()
+                        await asyncio.sleep(1)  # 等待选中生效
+
+                        # 3. 处理可能的确认弹窗 "是否确认应用此封面？"
+                        # 并不一定每次都会出现，健壮性判断：如果出现弹窗，则点击确定
+                        confirm_text = "是否确认应用此封面？"
+                        if await page.get_by_text(confirm_text).first.is_visible():
+                            print(f"  [-] 检测到确认弹窗: {confirm_text}")
+                            # 直接点击"确定"按钮，不依赖脆弱的 CSS 类名
+                            await page.get_by_role("button", name="确定").click()
+                            print("  [-] 已点击确认应用封面")
+                            await asyncio.sleep(1)
+
+                        print("  [-] 已完成封面选择流程")
+                        return True
+                    except Exception as e:
+                        print(f"  [-] 选择封面失败: {e}")
 
         return False
 
     async def set_thumbnail(self, page: Page, thumbnail_path: str):
         if thumbnail_path:
             douyin_logger.info('  [-] 正在设置视频封面...')
+            
+            # 在点击封面按钮前，再次检查并关闭位置权限弹窗
+            try:
+                await asyncio.sleep(0.5)
+                deny_button = page.locator("button:has-text('一律不允许'):visible")
+                if await deny_button.count() > 0:
+                    await deny_button.first.click()
+                    douyin_logger.info("  [-] 已关闭位置权限弹窗（封面设置前）")
+                    await asyncio.sleep(1)
+            except:
+                pass
+            
             await page.click('text="选择封面"')
-            await page.wait_for_selector("div.dy-creator-content-modal")
-            await page.click('text="设置竖封面"')
-            await page.wait_for_timeout(2000)  # 等待2秒
-            # 定位到上传区域并点击
+            await page.wait_for_selector("div.dy-creator-content-modal", timeout=5000)
+            douyin_logger.debug('  [-] 封面设置对话框已打开')
+            
+            # 点击顶部的"设置竖封面"标签（作为tab切换）
+            await page.wait_for_timeout(1000)
+            try:
+                # 尝试通过文本查找并点击"设置竖封面"标签
+                vertical_cover_tab = page.locator('text="设置竖封面"').first
+                if await vertical_cover_tab.is_visible():
+                    await vertical_cover_tab.click()
+                    douyin_logger.debug('  [-] 已切换到"设置竖封面"标签')
+            except:
+                douyin_logger.debug('  [-] 默认已在竖封面标签')
+            
+            await page.wait_for_timeout(1000)
+            
+            # 定位到上传区域并上传文件
             await page.locator("div[class^='semi-upload upload'] >> input.semi-upload-hidden-input").set_input_files(thumbnail_path)
-            await page.wait_for_timeout(2000)  # 等待2秒
-            await page.locator("div#tooltip-container button:visible:has-text('完成')").click()
-            # finish_confirm_element = page.locator("div[class^='confirmBtn'] >> div:has-text('完成')")
-            # if await finish_confirm_element.count():
-            #     await finish_confirm_element.click()
-            # await page.locator("div[class^='footer'] button:has-text('完成')").click()
+            douyin_logger.debug(f'  [-] 已选择封面文件: {thumbnail_path}')
+            
+            # 等待图片上传和处理完成，确保"完成"按钮变为可用状态
+            douyin_logger.debug('  [-] 等待封面图片处理完成...')
+            try:
+                # 等待"完成"按钮从disabled变为enabled（最多等待10秒）
+                complete_btn = page.locator("button:has-text('完成'):visible")
+                await complete_btn.first.wait_for(state="visible", timeout=10000)
+                # 额外等待确保按钮可点击
+                await page.wait_for_timeout(2000)
+                douyin_logger.debug('  [-] 封面处理完成，按钮已就绪')
+            except:
+                douyin_logger.warning('  [-] 等待"完成"按钮超时，继续尝试点击')
+                await page.wait_for_timeout(2000)
+            
+            # 点击"完成"按钮关闭封面编辑器（可能需要点击多次）
+            try:
+                # 第1次点击：关闭封面裁剪/编辑界面
+                douyin_logger.debug('  [-] 尝试关闭封面编辑界面...')
+                
+                # 在弹窗内查找所有可见的"完成"按钮
+                complete_buttons = page.locator("button:has-text('完成'):visible:not([disabled])")
+                button_count = await complete_buttons.count()
+                douyin_logger.debug(f'  [-] 找到 {button_count} 个可用的"完成"按钮')
+                
+                if button_count > 0:
+                    # 第一次点击 - 通常是编辑界面的完成
+                    await complete_buttons.first.click()
+                    douyin_logger.success('  [-] 第1次点击"完成"按钮（关闭编辑界面）')
+                    await page.wait_for_timeout(1500)
+                    
+                    # 检查是否还有"完成"按钮需要点击
+                    complete_buttons2 = page.locator("button:has-text('完成'):visible")
+                    button_count2 = await complete_buttons2.count()
+                    
+                    if button_count2 > 0:
+                        # 第二次点击 - 确认封面选择
+                        await complete_buttons2.first.click()
+                        douyin_logger.debug('  [-] 第2次点击"完成"按钮（确认封面）')
+                        await page.wait_for_timeout(1500)
+                    
+                    douyin_logger.success('  [+] 已完成所有"完成"按钮点击')
+                else:
+                    # 如果没找到"完成"，尝试找"设置竖封面"按钮
+                    set_cover_btn = page.locator("button:has-text('设置竖封面'):visible")
+                    if await set_cover_btn.count() > 0:
+                        await set_cover_btn.first.click()
+                        douyin_logger.debug('  [-] 点击"设置竖封面"按钮')
+                        await page.wait_for_timeout(1500)
+                    else:
+                        douyin_logger.warning('  [-] 未找到任何确认按钮')
+                    
+            except Exception as e:
+                douyin_logger.error(f'  [-] 点击确认按钮过程出错: {e}')
+                
             douyin_logger.info('  [+] 视频封面设置完成！')
+            
             # 等待封面设置对话框关闭
-            await page.wait_for_selector("div.extractFooter", state='detached')
+            try:
+                # 等待整个模态对话框消失
+                await page.wait_for_selector("div.dy-creator-content-modal", state='detached', timeout=5000)
+                douyin_logger.debug('  [-] 封面对话框已关闭')
+            except:
+                douyin_logger.warning('  [-] 封面对话框关闭超时，尝试多种方式强制关闭')
+                closed = False
+                
+                # 方法1：点击X关闭按钮
+                try:
+                    close_btn = page.locator("div.dy-creator-content-modal button[aria-label='关闭']")
+                    if await close_btn.count() > 0:
+                        await close_btn.click()
+                        await page.wait_for_timeout(1000)
+                        closed = True
+                        douyin_logger.debug('  [-] 已通过关闭按钮关闭对话框')
+                except:
+                    pass
+                
+                # 方法2：按ESC键
+                if not closed:
+                    try:
+                        await page.keyboard.press("Escape")
+                        await page.wait_for_timeout(1000)
+                        douyin_logger.debug('  [-] 已通过ESC键关闭对话框')
+                        closed = True
+                    except:
+                        pass
+                
+                # 方法3：点击对话框外的遮罩层
+                if not closed:
+                    try:
+                        mask = page.locator("div.dy-creator-content-modal-wrap")
+                        if await mask.count() > 0:
+                            # 点击遮罩层边缘（不在对话框内容区域）
+                            await mask.click(position={"x": 10, "y": 10})
+                            await page.wait_for_timeout(1000)
+                            douyin_logger.debug('  [-] 已通过点击遮罩层关闭对话框')
+                    except:
+                        pass
+            
+            # 额外检查：确保封面编辑工具界面也关闭了
+            await page.wait_for_timeout(1000)
+            try:
+                # 查找并关闭可能存在的封面编辑工具界面
+                portal = page.locator("div.dy-creator-content-portal")
+                if await portal.count() > 0 and await portal.is_visible():
+                    douyin_logger.debug('  [-] 检测到封面编辑界面仍存在，尝试关闭...')
+                    # 多次按ESC确保所有弹窗都关闭
+                    for i in range(3):
+                        await page.keyboard.press("Escape")
+                        await page.wait_for_timeout(500)
+                    douyin_logger.debug('  [-] 已关闭封面编辑界面')
+            except:
+                pass
             
 
     async def set_location(self, page: Page, location: str = ""):
