@@ -24,10 +24,11 @@ if exist ".\videos\tmp.jpg" (
     del /F /Q ".\videos\tmp.jpg"
     echo ✓ 已删除旧的 tmp.jpg
 )
-if exist ".\output_video\date.txt" (
-    del /F /Q ".\output_video\date.txt"
-    echo ✓ 已删除旧的 date.txt
+if exist ".\output_video\date*" (
+    del /F /Q ".\output_video\date*"
+    echo ✓ 已删除旧的 date*
 )
+
 echo ✓ 清理完成
 echo.
 

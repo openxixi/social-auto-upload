@@ -172,10 +172,27 @@ class DouYinVideo(object):
         # 这里为了避免页面变化，故使用相对位置定位：作品标题父级右侧第一个元素的input子元素
         await asyncio.sleep(1)
         douyin_logger.info(f'  [-] 正在填充标题和话题...')
+        
+        # 方式1: 尝试通过"作品标题"文本定位
         title_container = page.get_by_text('作品标题').locator("..").locator("xpath=following-sibling::div[1]").locator("input")
+        
+        # 方式2: 如果找不到"作品标题"，尝试通过"作品描述"文本定位
+        if await title_container.count() == 0:
+            douyin_logger.info(f'  [-] 未找到"作品标题"，尝试通过"作品描述"定位...')
+            title_container = page.get_by_text('作品描述').locator("..").locator("xpath=following-sibling::div[1]").locator("input")
+        
+        # 方式3: 如果还是找不到，尝试通过 placeholder 文本定位
+        if await title_container.count() == 0:
+            douyin_logger.info(f'  [-] 尝试通过 placeholder 定位标题输入框...')
+            title_container = page.locator('input[placeholder*="填写作品标题"]')
+        
+        # 填写标题
         if await title_container.count():
             await title_container.fill(self.title[:30])
+            douyin_logger.info(f'  [-] 已填写标题: {self.title[:30]}')
         else:
+            # 备用方案：使用 .notranslate 类定位
+            douyin_logger.info(f'  [-] 使用备用方案定位标题输入框...')
             titlecontainer = page.locator(".notranslate")
             await titlecontainer.click()
             await page.keyboard.press("Backspace")
@@ -183,6 +200,8 @@ class DouYinVideo(object):
             await page.keyboard.press("Delete")
             await page.keyboard.type(self.title)
             await page.keyboard.press("Enter")
+            douyin_logger.info(f'  [-] 已填写标题（备用方案）: {self.title}')
+        
         css_selector = ".zone-container"
         for index, tag in enumerate(self.tags, start=1):
             await page.type(css_selector, "#" + tag)
@@ -389,19 +408,64 @@ class DouYinVideo(object):
                     # 第一次点击 - 通常是编辑界面的完成
                     await complete_buttons.first.click()
                     douyin_logger.success('  [-] 第1次点击"完成"按钮（关闭编辑界面）')
-                    await page.wait_for_timeout(1500)
                     
-                    # 检查是否还有"完成"按钮需要点击
-                    complete_buttons2 = page.locator("button:has-text('完成'):visible")
+                    # 关键：第一次点击后必定会弹出"设置横封面获更多流量"对话框
+                    # 需要等待该对话框出现并处理
+                    await page.wait_for_timeout(800)
+                    douyin_logger.debug('  [-] 等待横封面推荐弹窗出现...')
+                    
+                    # 等待并处理横封面推荐弹窗（最常见的情况）
+                    try:
+                        # 使用更精确的定位器，等待弹窗出现
+                        await page.wait_for_selector("button:has-text('暂不设置')", state="visible", timeout=3000)
+                        
+                        skip_horizontal_btn = page.locator("button:has-text('暂不设置'):visible")
+                        skip_count = await skip_horizontal_btn.count()
+                        douyin_logger.debug(f'  [-] 找到 {skip_count} 个"暂不设置"按钮')
+                        
+                        if skip_count > 0:
+                            await skip_horizontal_btn.first.click()
+                            douyin_logger.success("  [-] ✓ 已点击'暂不设置'关闭横封面推荐弹窗")
+                            await page.wait_for_timeout(1000)
+                        
+                    except Exception as e:
+                        douyin_logger.warning(f"  [-] 等待横封面弹窗超时，尝试其他方式: {e}")
+                        
+                        # 备用方案：直接查找并点击
+                        try:
+                            skip_btn2 = page.locator("button:has-text('暂不设置'):visible")
+                            if await skip_btn2.count() > 0:
+                                await skip_btn2.first.click()
+                                douyin_logger.info("  [-] ✓ 备用方案：已点击'暂不设置'")
+                                await page.wait_for_timeout(1000)
+                        except:
+                            pass
+                    
+                    # 额外检查位置权限弹窗
+                    try:
+                        deny_btn = page.locator("button:has-text('一律不允许'):visible")
+                        if await deny_btn.count() > 0:
+                            await deny_btn.first.click()
+                            douyin_logger.info("  [-] ✓ 已关闭位置权限弹窗")
+                            await page.wait_for_timeout(500)
+                    except:
+                        pass
+                    
+                    # 现在应该没有弹窗了，检查是否还有第二个"完成"按钮
+                    await page.wait_for_timeout(500)
+                    complete_buttons2 = page.locator("button:has-text('完成'):visible:not([disabled])")
                     button_count2 = await complete_buttons2.count()
+                    douyin_logger.debug(f'  [-] 检查是否有第二个"完成"按钮: 找到 {button_count2} 个')
                     
                     if button_count2 > 0:
-                        # 第二次点击 - 确认封面选择
+                        # 有第二个完成按钮，说明还需要确认
                         await complete_buttons2.first.click()
-                        douyin_logger.debug('  [-] 第2次点击"完成"按钮（确认封面）')
-                        await page.wait_for_timeout(1500)
+                        douyin_logger.success('  [-] 第2次点击"完成"按钮（最终确认）')
+                        await page.wait_for_timeout(1000)
+                    else:
+                        douyin_logger.info('  [-] 没有第二个"完成"按钮，封面设置已完成')
                     
-                    douyin_logger.success('  [+] 已完成所有"完成"按钮点击')
+                    douyin_logger.success('  [+] 封面设置流程完成')
                 else:
                     # 如果没找到"完成"，尝试找"设置竖封面"按钮
                     set_cover_btn = page.locator("button:has-text('设置竖封面'):visible")
@@ -458,6 +522,18 @@ class DouYinVideo(object):
                             douyin_logger.debug('  [-] 已通过点击遮罩层关闭对话框')
                     except:
                         pass
+            
+            # 处理"设置横封面获更多流量"弹窗
+            try:
+                await asyncio.sleep(1)
+                # 查找"暂不设置"按钮
+                skip_horizontal_cover_btn = page.locator("button:has-text('暂不设置'):visible")
+                if await skip_horizontal_cover_btn.count() > 0:
+                    await skip_horizontal_cover_btn.first.click()
+                    douyin_logger.info("  [-] 已关闭横封面推荐弹窗（点击'暂不设置'）")
+                    await asyncio.sleep(1)
+            except Exception as e:
+                douyin_logger.debug(f"  [-] 未检测到横封面推荐弹窗: {e}")
             
             # 额外检查：确保封面编辑工具界面也关闭了
             await page.wait_for_timeout(1000)
