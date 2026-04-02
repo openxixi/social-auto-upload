@@ -79,14 +79,8 @@ def main():
             success_count += 1
         else:
             failed_steps.append(f"步骤{i}: {step['description']}")
-            print(f"\n⚠️  是否继续执行后续步骤？")
-            print("1. 继续执行")
-            print("2. 停止流程")
-            
-            choice = input("请选择 (1/2，默认为2): ").strip()
-            if choice != "1":
-                print("\n❌ 流程已中止")
-                break
+            print(f"\n⚠️  步骤失败，自动继续执行后续步骤...")
+            # 自动继续执行，不再需要用户确认
     
     # 总结
     end_time = datetime.now()
