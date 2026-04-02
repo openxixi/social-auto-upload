@@ -14,7 +14,7 @@ if __name__ == '__main__':
     # 获取文件夹中的所有文件
     files = list(folder_path.glob("*.mp4"))
     file_num = len(files)
-    publish_datetimes = generate_schedule_time_next_day(file_num, 1, daily_times=[8], timestamps=False, start_days=-1)
+    publish_datetimes = generate_schedule_time_next_day(file_num, 1, daily_times=[19], timestamps=False, start_days=-1)
     cookie_setup = asyncio.run(douyin_setup(account_file, handle=False))
     for index, file in enumerate(files):
         title, tags = get_title_and_hashtags(str(file))
