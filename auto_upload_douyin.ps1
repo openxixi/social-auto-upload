@@ -149,15 +149,61 @@ if (-not $port7860Final -and -not $port7866Final) {
 Write-Host ""
 
 Write-Host "============================================================"
-Write-Host "激活 Conda 环境: social-auto-upload"
+Write-Host "配置 Python 环境: social-auto-upload"
 Write-Host "============================================================"
-conda activate social-auto-upload
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "✗ Conda 环境激活失败" -ForegroundColor Red
+
+# 直接查找 Conda 环境路径，不依赖 conda activate
+$CondaEnvPath = $null
+$PossiblePaths = @(
+    "$env:USERPROFILE\.conda\envs\social-auto-upload",
+    "$env:USERPROFILE\anaconda3\envs\social-auto-upload",
+    "$env:USERPROFILE\miniconda3\envs\social-auto-upload"
+)
+
+foreach ($path in $PossiblePaths) {
+    if (Test-Path "$path\python.exe") {
+        $CondaEnvPath = $path
+        Write-Host "✓ 找到 Conda 环境: $path" -ForegroundColor Green
+        break
+    }
+}
+
+if (-not $CondaEnvPath) {
+    Write-Host "✗ 找不到 social-auto-upload Conda 环境" -ForegroundColor Red
+    Write-Host "  尝试的路径:" -ForegroundColor Gray
+    foreach ($path in $PossiblePaths) {
+        Write-Host "  - $path" -ForegroundColor Gray
+    }
     Clean-Services
     exit 1
 }
-Write-Host "✓ Conda 环境已激活" -ForegroundColor Green
+
+# 设置环境变量，强制使用 Conda 环境的 Python
+$PythonExe = Join-Path $CondaEnvPath "python.exe"
+$env:PATH = "$CondaEnvPath;$CondaEnvPath\Scripts;$CondaEnvPath\Library\bin;$env:PATH"
+$env:PYTHONIOENCODING = "utf-8"
+$env:CONDA_PREFIX = $CondaEnvPath
+$env:CONDA_DEFAULT_ENV = "social-auto-upload"
+
+Write-Host "Python 可执行文件: $PythonExe" -ForegroundColor Cyan
+
+# 验证 Python 和 PIL 模块
+$TestPIL = & $PythonExe -c "import sys; print(sys.executable); import PIL; print('PIL_OK')" 2>&1
+$TestOutput = $TestPIL -join "`n"
+
+if ($TestOutput -match "PIL_OK") {
+    Write-Host "✓ Python 环境配置成功，PIL 模块可用" -ForegroundColor Green
+    # 显示实际使用的 Python 路径（由 sys.executable 返回）
+    $ActualPython = ($TestOutput -split "`n" | Select-Object -First 1).Trim()
+    Write-Host "  实际使用: $ActualPython" -ForegroundColor Gray
+} else {
+    Write-Host "✗ PIL 模块不可用" -ForegroundColor Red
+    Write-Host "  错误信息:" -ForegroundColor Gray
+    Write-Host $TestOutput -ForegroundColor Gray
+    Clean-Services
+    exit 1
+}
+
 Write-Host ""
 
 Write-Host "============================================================"
