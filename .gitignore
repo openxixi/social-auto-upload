@@ -192,3 +192,11 @@ videos
 videos_backup
 output_video
 videos_pre
+
+# Temporary large video files
+tmp.mp4
+tmp.jpg
+*.mp4
+*.avi
+*.mov
+*.mkv
