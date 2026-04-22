@@ -79,6 +79,17 @@ Write-Host "============================================================"
 Write-Host "启动后台服务"
 Write-Host "============================================================"
 
+# 清除代理环境变量，避免影响 AI 服务启动
+# Write-Host "清除代理环境变量..." -ForegroundColor Cyan
+# $env:HTTP_PROXY = $null
+# $env:HTTPS_PROXY = $null
+# $env:http_proxy = $null
+# $env:https_proxy = $null
+# $env:ALL_PROXY = $null
+# $env:NO_PROXY = $null
+# Write-Host "✓ 代理环境变量已清除" -ForegroundColor Green
+# Write-Host ""
+
 # 启动第一个 bat 文件 (端口 7866)
 Write-Host "启动 index-tts2 服务 (端口 7866)..." -ForegroundColor Cyan
 $script:process1 = Start-Process -FilePath "cmd.exe" -ArgumentList "/k cd /d D:\workspace\github\ml\index-tts2 && start.bat" -PassThru -WindowStyle Normal
@@ -260,7 +271,7 @@ Write-Host ""
 Write-Host "============================================================"
 Write-Host "步骤3: 生成数字人视频"
 Write-Host "============================================================"
-python .\workflow.py "D:\workspace\github\openyixi\social-auto-upload\output_video\date.txt" "D:\video_workspace\source_audio\zyxtest20251221.m4a" "D:\video_workspace\source_picture\4_zyx_ttxd.jpg" .\output_video\ --prompt "男人正在说话"
+python .\workflow.py "D:\workspace\github\openyixi\social-auto-upload\output_video\date.txt" "D:\video_workspace\source_audio\zyxtest20251221.m4a" "D:\video_workspace\source_picture\6_zyx.webp" .\output_video\ --prompt "男人正在说话"
 if ($LASTEXITCODE -ne 0) {
     Write-Host "✗ 步骤3失败" -ForegroundColor Red
     Clean-Services
