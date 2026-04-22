@@ -60,7 +60,7 @@ def add_date_to_image(image_path, output_path=None, date_format="%Y年%m月%d日
     
     # 计算文字位置（右下角，红框位置）
     margin_right = int(width * 0.08)  # 距离右边8%
-    margin_bottom = int(height * 0.32)  # 距离底部42%（约在身体中部）
+    margin_bottom = int(height * 0.20)  # 距离底部20%
     x = width - text_width - margin_right
     y = height - text_height - margin_bottom
     
