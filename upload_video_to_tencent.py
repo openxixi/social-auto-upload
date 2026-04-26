@@ -1,4 +1,5 @@
 import asyncio
+import platform
 from pathlib import Path
 
 from conf import BASE_DIR
@@ -8,7 +9,15 @@ from utils.files_times import generate_schedule_time_next_day, get_title_and_has
 
 
 if __name__ == '__main__':
-    filepath = Path(BASE_DIR) / "videos"
+    # 根据操作系统设置视频文件路径
+    system = platform.system().lower()
+    if system == 'linux':
+        # Ubuntu/Linux 系统使用共享目录
+        filepath = Path("/mnt/win_share/github/openyixi/social-auto-upload/videos")
+    else:
+        # Windows 系统使用相对路径
+        filepath = Path(BASE_DIR) / "videos"
+    
     account_file = Path(BASE_DIR / "cookies" / "tencent_uploader" / "account.json")
     # 获取视频目录
     folder_path = Path(filepath)
