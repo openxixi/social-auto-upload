@@ -134,21 +134,29 @@ def get_video_info(video_path):
         return None
 
 
-def concat_videos(video1, video2, output, cover=None, cover_duration=3, resolution="auto"):
+def concat_videos(videos, output, cover=None, cover_duration=3, resolution="auto"):
     """
-    方式1: 前后拼接两个视频（简单连接）
-    如果提供封面，则按照 封面 -> video1 -> video2 的顺序拼接
+    方式1: 前后拼接多个视频（简单连接）
+    如果提供封面，则按照 封面 -> video1 -> video2 -> ... 的顺序拼接
     
     Args:
+        videos: 视频文件路径列表
+        output: 输出文件路径
+        cover: 封面图片路径（可选）
+        cover_duration: 封面显示时长（秒）
         resolution: 输出分辨率，"auto" 表示使用第一个视频的分辨率，或指定如 "1920x1080"
     """
-    logger.info("正在拼接视频（前后连接）...")
+    if not videos or len(videos) == 0:
+        logger.error("至少需要提供1个视频文件")
+        return False
+    
+    logger.info(f"正在拼接 {len(videos)} 个视频（前后连接）...")
     
     temp_cover_video = None
     
     try:
         # 获取第一个视频的信息
-        video_info = get_video_info(video1)
+        video_info = get_video_info(videos[0])
         
         if not video_info:
             logger.error("无法获取视频信息，使用默认参数")
@@ -179,32 +187,36 @@ def concat_videos(video1, video2, output, cover=None, cover_duration=3, resoluti
         
         logger.info(f"视频参数: {target_width}x{target_height}, {target_fps}fps, 视频码率:{video_bitrate}k, 音频码率:{audio_bitrate}k")
         
-        # 获取两个视频的音量，用于音量匹配
+        # 获取所有视频的音量，用于音量匹配
         logger.info("正在分析视频音量...")
-        volume1 = get_video_volume(video1)
-        volume2 = get_video_volume(video2)
+        volumes = []
+        for i, video in enumerate(videos, 1):
+            volume = get_video_volume(video)
+            volumes.append(volume)
+            if volume is not None:
+                logger.info(f"视频{i}平均音量: {volume:.1f} dB")
         
-        volume_adjustment1 = 0  # 视频1的音量调整
-        volume_adjustment2 = 0  # 视频2的音量调整
+        # 计算每个视频的音量调整值
+        volume_adjustments = []
+        valid_volumes = [v for v in volumes if v is not None]
         
-        if volume1 is not None and volume2 is not None:
-            logger.info(f"视频1平均音量: {volume1:.1f} dB")
-            logger.info(f"视频2平均音量: {volume2:.1f} dB")
-            
-            # 找出音量更大的（分贝更高的，注意-14 > -33.7）
-            target_volume = max(volume1, volume2)
+        if valid_volumes:
+            # 找出音量最大的（分贝更高的，注意-14 > -33.7）
+            target_volume = max(valid_volumes)
             logger.info(f"目标音量（以更大的为准）: {target_volume:.1f} dB")
             
             # 计算每个视频需要调整的音量
-            volume_adjustment1 = target_volume - volume1
-            volume_adjustment2 = target_volume - volume2
-            
-            if abs(volume_adjustment1) > 0.5:
-                logger.info(f"将视频1音量调整: {volume_adjustment1:+.1f} dB")
-            if abs(volume_adjustment2) > 0.5:
-                logger.info(f"将视频2音量调整: {volume_adjustment2:+.1f} dB")
+            for i, volume in enumerate(volumes, 1):
+                if volume is not None:
+                    adjustment = target_volume - volume
+                    volume_adjustments.append(adjustment)
+                    if abs(adjustment) > 0.5:
+                        logger.info(f"将视频{i}音量调整: {adjustment:+.1f} dB")
+                else:
+                    volume_adjustments.append(0)
         else:
             logger.warning("无法获取音量信息，不进行音量调整")
+            volume_adjustments = [0] * len(videos)
         
         # 构建输入参数和filter
         inputs = []
@@ -249,29 +261,19 @@ def concat_videos(video1, video2, output, cover=None, cover_duration=3, resoluti
             n += 1
             logger.info("✓ 封面处理完成")
         
-        # 添加视频1
-        inputs.extend(['-i', video1])
-        # 将视频1缩放并裁剪到指定尺寸（填满屏幕）
-        scale_filters.append(f'[{n}:v]scale={target_resolution}:force_original_aspect_ratio=increase,crop={target_resolution},setsar=1,fps={target_fps}[v{n}]')
-        # 调整视频1的音量（如果需要）
-        if abs(volume_adjustment1) > 0.5:  # 只有差异大于0.5dB时才调整
-            audio_filters.append(f'[{n}:a]volume={volume_adjustment1}dB[a{n}]')
-        else:
-            audio_filters.append(f'[{n}:a]anull[a{n}]')  # 差异很小，不调整
-        concat_inputs.append(f'[v{n}][a{n}]')
-        n += 1
-        
-        # 添加视频2
-        inputs.extend(['-i', video2])
-        # 将视频2缩放并裁剪到指定尺寸（填满屏幕）
-        scale_filters.append(f'[{n}:v]scale={target_resolution}:force_original_aspect_ratio=increase,crop={target_resolution},setsar=1,fps={target_fps}[v{n}]')
-        # 调整视频2的音量（如果需要）
-        if abs(volume_adjustment2) > 0.5:  # 只有差异大于0.5dB时才调整
-            audio_filters.append(f'[{n}:a]volume={volume_adjustment2}dB[a{n}]')
-        else:
-            audio_filters.append(f'[{n}:a]anull[a{n}]')  # 差异很小，不调整
-        concat_inputs.append(f'[v{n}][a{n}]')
-        n += 1
+        # 添加所有视频
+        for i, video in enumerate(videos):
+            inputs.extend(['-i', video])
+            # 将视频缩放并裁剪到指定尺寸（填满屏幕）
+            scale_filters.append(f'[{n}:v]scale={target_resolution}:force_original_aspect_ratio=increase,crop={target_resolution},setsar=1,fps={target_fps}[v{n}]')
+            # 调整视频的音量（如果需要）
+            if abs(volume_adjustments[i]) > 0.5:  # 只有差异大于0.5dB时才调整
+                audio_filters.append(f'[{n}:a]volume={volume_adjustments[i]}dB[a{n}]')
+            else:
+                audio_filters.append(f'[{n}:a]anull[a{n}]')  # 差异很小，不调整
+            concat_inputs.append(f'[v{n}][a{n}]')
+            n += 1
+            logger.info(f"  添加视频 {i+1}/{len(videos)}: {os.path.basename(video)}")
         
         # 构建完整的 filter_complex
         all_filters = scale_filters + audio_filters
@@ -551,40 +553,41 @@ def add_cover_to_video(video, cover_image, output, duration=0.5):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="视频融合工具 - 使用FFmpeg将两段视频融合",
+        description="视频融合工具 - 使用FFmpeg将多段视频融合",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用示例:
-  # 前后拼接（默认）
+  # 前后拼接（支持多个视频）
   python merge_videos.py video1.mp4 video2.mp4 -o output.mp4
+  python merge_videos.py video1.mp4 video2.mp4 video3.mp4 video4.mp4 -o output.mp4
   
-  # 左右并排
+  # 左右并排（仅支持2个视频）
   python merge_videos.py video1.mp4 video2.mp4 -o output.mp4 --mode side
   
-  # 上下排列
+  # 上下排列（仅支持2个视频）
   python merge_videos.py video1.mp4 video2.mp4 -o output.mp4 --mode stack
   
-  # 画中画（video2叠加在video1右上角）
+  # 画中画（video2叠加在video1右上角，仅支持2个视频）
   python merge_videos.py video1.mp4 video2.mp4 -o output.mp4 --mode pip
   
   # 画中画（自定义位置和大小）
   python merge_videos.py video1.mp4 video2.mp4 -o output.mp4 --mode pip --position bottom-left --scale 0.25
   
-  # 混合叠加
+  # 混合叠加（仅支持2个视频）
   python merge_videos.py video1.mp4 video2.mp4 -o output.mp4 --mode blend --opacity 0.6
   
-  # 交叉淡化过渡
+  # 交叉淡化过渡（仅支持2个视频）
   python merge_videos.py video1.mp4 video2.mp4 -o output.mp4 --mode crossfade --duration 2
   
   # 添加封面（在视频开头添加封面图片）
   python merge_videos.py video1.mp4 video2.mp4 -o output.mp4 --cover cover.jpg
-  python merge_videos.py video1.mp4 video2.mp4 -o output.mp4 --cover cover.png --cover-duration 5
+  python merge_videos.py video1.mp4 video2.mp4 video3.mp4 -o output.mp4 --cover cover.png --cover-duration 5
   
   # 使用第一个视频的分辨率和参数（默认，自动匹配）
-  python merge_videos.py video1.mp4 video2.mp4
+  python merge_videos.py video1.mp4 video2.mp4 video3.mp4
   
   # 指定输出分辨率（1080p横屏）
-  python merge_videos.py video1.mp4 video2.mp4 --resolution 1920x1080
+  python merge_videos.py video1.mp4 video2.mp4 video3.mp4 --resolution 1920x1080
   
   # 指定输出分辨率（1080p竖屏，抖音常用）
   python merge_videos.py video1.mp4 video2.mp4 --resolution 1080x1920 --cover cover.jpg
@@ -594,8 +597,7 @@ def main():
         """
     )
     
-    parser.add_argument("video1", help="第一个视频文件")
-    parser.add_argument("video2", help="第二个视频文件")
+    parser.add_argument("videos", nargs='+', help="要合并的视频文件（支持多个）")
     
     # 默认输出文件名
     default_output = "tmp.mp4"
@@ -643,13 +645,14 @@ def main():
     args = parser.parse_args()
     
     # 检查输入文件
-    if not os.path.exists(args.video1):
-        logger.error(f"错误: 视频文件不存在: {args.video1}")
+    if len(args.videos) == 0:
+        logger.error("错误: 至少需要提供1个视频文件")
         return False
     
-    if not os.path.exists(args.video2):
-        logger.error(f"错误: 视频文件不存在: {args.video2}")
-        return False
+    for video in args.videos:
+        if not os.path.exists(video):
+            logger.error(f"错误: 视频文件不存在: {video}")
+            return False
     
     # 检查封面文件
     if args.cover and not os.path.exists(args.cover):
@@ -660,8 +663,9 @@ def main():
     if not check_ffmpeg():
         return False
     
-    logger.info(f"输入视频1: {args.video1}")
-    logger.info(f"输入视频2: {args.video2}")
+    logger.info(f"输入视频数量: {len(args.videos)}")
+    for i, video in enumerate(args.videos, 1):
+        logger.info(f"  视频{i}: {video}")
     logger.info(f"融合模式: {args.mode}")
     if args.cover:
         logger.info(f"封面图片: {args.cover} (显示{args.cover_duration}秒)")
@@ -671,20 +675,26 @@ def main():
     # 根据模式执行相应的融合操作
     success = False
     if args.mode == "concat":
-        # concat模式支持直接添加封面
-        success = concat_videos(args.video1, args.video2, args.output, 
+        # concat模式支持多个视频和直接添加封面
+        success = concat_videos(args.videos, args.output, 
                                args.cover, args.cover_duration, args.resolution)
-    elif args.mode == "side":
-        success = side_by_side_videos(args.video1, args.video2, args.output)
-    elif args.mode == "stack":
-        success = top_bottom_videos(args.video1, args.video2, args.output)
-    elif args.mode == "pip":
-        success = picture_in_picture(args.video1, args.video2, args.output,
-                                    args.position, args.scale)
-    elif args.mode == "blend":
-        success = blend_videos(args.video1, args.video2, args.output, args.opacity)
-    elif args.mode == "crossfade":
-        success = crossfade_videos(args.video1, args.video2, args.output, args.duration)
+    elif args.mode in ["side", "stack", "pip", "blend", "crossfade"]:
+        # 其他模式仅支持2个视频
+        if len(args.videos) != 2:
+            logger.error(f"错误: {args.mode} 模式仅支持2个视频文件，但提供了{len(args.videos)}个")
+            return False
+        
+        if args.mode == "side":
+            success = side_by_side_videos(args.videos[0], args.videos[1], args.output)
+        elif args.mode == "stack":
+            success = top_bottom_videos(args.videos[0], args.videos[1], args.output)
+        elif args.mode == "pip":
+            success = picture_in_picture(args.videos[0], args.videos[1], args.output,
+                                        args.position, args.scale)
+        elif args.mode == "blend":
+            success = blend_videos(args.videos[0], args.videos[1], args.output, args.opacity)
+        elif args.mode == "crossfade":
+            success = crossfade_videos(args.videos[0], args.videos[1], args.output, args.duration)
     
     if success:
         # 如果是非concat模式且需要添加封面
