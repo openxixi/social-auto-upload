@@ -98,6 +98,59 @@ class DouYinVideo(object):
         douyin_logger.info('视频出错了，重新上传中')
         await page.locator('div.progress-div [class^="upload-btn-input"]').set_input_files(self.file_path)
 
+    async def handle_declaration_modal(self, page):
+        """处理"对作品内容添加声明"弹窗，自动选择"无需添加自主声明" """
+        try:
+            douyin_logger.info('  [*] 等待声明弹窗出现...')
+            # 给弹窗更多时间出现
+            await asyncio.sleep(1)
+            
+            # 尝试多种方式定位弹窗
+            # 方式1：通过文本定位
+            modal_title = page.locator('text=对作品内容添加声明')
+            
+            # 等待弹窗出现，增加超时时间到5秒
+            await modal_title.wait_for(state='visible', timeout=5000)
+            douyin_logger.info('  [+] 检测到声明弹窗')
+            
+            # 等待一下确保弹窗完全加载
+            await asyncio.sleep(0.5)
+            
+            # 尝试多种方式定位"无需添加自主声明"选项
+            # 方式1：通过文本精确匹配
+            no_declaration = page.locator('label:has-text("无需添加自主声明")')
+            
+            if await no_declaration.count() == 0:
+                # 方式2：通过父元素查找
+                no_declaration = page.locator('text=无需添加自主声明')
+            
+            douyin_logger.info('  [+] 点击"无需添加自主声明"选项')
+            await no_declaration.click()
+            await asyncio.sleep(1)
+            
+            # 定位并点击确定按钮
+            confirm_button = page.locator('button:has-text("确定")')
+            if await confirm_button.count() == 0:
+                confirm_button = page.get_by_role('button', name='确定')
+            
+            douyin_logger.info('  [+] 点击确定按钮')
+            await confirm_button.click()
+            
+            douyin_logger.success('  [✓] 已成功选择"无需添加自主声明"并确认')
+            await asyncio.sleep(1)
+            return True
+            
+        except Exception as e:
+            # 记录详细错误信息
+            douyin_logger.info(f'  [-] 处理声明弹窗时出现问题: {str(e)}')
+            # 截图便于调试
+            try:
+                await page.screenshot(path='declaration_modal_error.png')
+                douyin_logger.info('  [*] 已保存错误截图: declaration_modal_error.png')
+            except:
+                pass
+            return False
+
     async def upload(self, playwright: Playwright) -> None:
         # 使用 Chromium 浏览器启动一个浏览器实例
         if self.local_executable_path:
@@ -259,7 +312,13 @@ class DouYinVideo(object):
             try:
                 publish_button = page.get_by_role('button', name="发布", exact=True)
                 if await publish_button.count():
+                    douyin_logger.info('  [+] 点击发布按钮')
                     await publish_button.click()
+                    # 给页面一点时间响应
+                    await asyncio.sleep(0.5)
+                    # 点击发布后，处理可能出现的声明弹窗
+                    await self.handle_declaration_modal(page)
+                
                 await page.wait_for_url("https://creator.douyin.com/creator-micro/content/manage**",
                                         timeout=3000)  # 如果自动跳转到作品页面，则代表发布成功
                 douyin_logger.success("  [-]视频发布成功")
