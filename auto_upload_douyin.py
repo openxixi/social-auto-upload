@@ -45,28 +45,56 @@ def main():
     print(f"# 开始时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'#'*60}")
     
-    steps = [
-        {
-            "command": 'python add_date_to_image.py ".\\videos_pre\\tmp.jpg" -o ".\\videos\\tmp.jpg"',
-            "description": "步骤1: 为图片添加日期"
-        },
-        {
-            "command": "python generate_date.py",
-            "description": "步骤2: 生成日期文件"
-        },
-        {
-            "command": 'python .\\workflow.py "D:\\video_workspace\\source_txt\\8_海尔能做我就能说.txt" "D:\\video_workspace\\source_audio\\zyxtest20251221.m4a" "D:\\video_workspace\\source_picture\\4_zyx_ttxd.jpg" .\\output_video\\ --prompt "男人正在说话"',
-            "description": "步骤3: 生成数字人视频"
-        },
-        {
-            "command": 'python .\\merge_videos.py "D:\\workspace\\movie\\cailiao\\demo\\demo.mp4" "D:\\workspace\\github\\openyixi\\social-auto-upload\\output_video\\data.mp4" -o .\\videos\\tmp.mp4',
-            "description": "步骤4: 合并视频"
-        },
-        {
-            "command": "python upload_video_to_douyin.py",
-            "description": "步骤5: 上传视频到抖音"
-        }
-    ]
+    # 根据操作系统设置路径分隔符和路径
+    is_windows = os.name == 'nt'
+    sep = '\\' if is_windows else '/'
+    
+    if is_windows:
+        steps = [
+            {
+                "command": f'python add_date_to_image.py ".{sep}videos_pre{sep}tmp.jpg" -o ".{sep}videos{sep}tmp.jpg"',
+                "description": "步骤1: 为图片添加日期"
+            },
+            {
+                "command": "python generate_date.py",
+                "description": "步骤2: 生成日期文件"
+            },
+            {
+                "command": f'python .{sep}workflow.py "D:\\video_workspace\\source_txt\\8_海尔能做我就能说.txt" "D:\\video_workspace\\source_audio\\zyxtest20251221.m4a" "D:\\video_workspace\\source_picture\\4_zyx_ttxd.jpg" .{sep}output_video{sep} --prompt "男人正在说话"',
+                "description": "步骤3: 生成数字人视频"
+            },
+            {
+                "command": f'python .{sep}merge_videos.py "D:\\workspace\\movie\\cailiao\\demo\\demo.mp4" "D:\\workspace\\github\\openyixi\\social-auto-upload\\output_video\\data.mp4" -o .{sep}videos{sep}tmp.mp4',
+                "description": "步骤4: 合并视频"
+            },
+            {
+                "command": "python upload_video_to_douyin.py",
+                "description": "步骤5: 上传视频到抖音"
+            }
+        ]
+    else:  # Linux
+        steps = [
+            {
+                "command": f'python add_date_to_image.py "./videos_pre/tmp.jpg" -o "./videos/tmp.jpg"',
+                "description": "步骤1: 为图片添加日期"
+            },
+            {
+                "command": "python generate_date.py",
+                "description": "步骤2: 生成日期文件"
+            },
+            {
+                "command": f'python ./workflow.py "/mnt/ugreen/video_workspace/source_txt/8_海尔能做我就能说.txt" "/mnt/ugreen/video_workspace/source_audio/zyxtest20251221.m4a" "/mnt/ugreen/video_workspace/source_picture/4_zyx_ttxd.jpg" ./output_video/ --prompt "男人正在说话"',
+                "description": "步骤3: 生成数字人视频"
+            },
+            {
+                "command": f'python ./merge_videos.py "/mnt/ugreen/workspace/movie/cailiao/demo/demo.mp4" "./output_video/data.mp4" -o ./videos/tmp.mp4',
+                "description": "步骤4: 合并视频"
+            },
+            {
+                "command": "python upload_video_to_douyin.py",
+                "description": "步骤5: 上传视频到抖音"
+            }
+        ]
     
     # 执行所有步骤
     success_count = 0

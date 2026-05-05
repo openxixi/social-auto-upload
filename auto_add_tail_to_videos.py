@@ -7,6 +7,7 @@
 
 import os
 import sys
+import platform
 import argparse
 import subprocess
 import logging
@@ -152,7 +153,7 @@ def find_date_videos(date_dict_dir, year, month, day):
     return date_videos
 
 
-def concat_videos_with_date(input_video, output_video, date_dict_dir, target_date=None, cover=None):
+def concat_videos_with_date(input_video, output_video, date_dict_dir, target_date=None, cover=None, resolution="auto", fit_mode="pad"):
     """
     将输入视频与日期视频拼接（使用 merge_videos.py）
     
@@ -248,6 +249,12 @@ def concat_videos_with_date(input_video, output_video, date_dict_dir, target_dat
 
 def main():
     """主函数"""
+    # 根据操作系统设置默认日期字典路径
+    if platform.system() == 'Linux':
+        default_date_dict = '/home/nuc/date_dictionary'
+    else:  # Windows
+        default_date_dict = r'D:\video_workspace\jianying_output\date_dictionary'
+    
     parser = argparse.ArgumentParser(
         description='自动添加日期尾部到视频',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -280,8 +287,8 @@ def main():
     
     parser.add_argument(
         '-d', '--date-dict',
-        default=r'D:\video_workspace\jianying_output\date_dictionary',
-        help='日期字典目录路径（默认: D:\\video_workspace\\jianying_output\\date_dictionary）'
+        default=default_date_dict,
+        help=f'日期字典目录路径（默认: {default_date_dict}）'
     )
     
     parser.add_argument(

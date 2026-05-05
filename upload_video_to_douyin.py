@@ -12,7 +12,7 @@ if __name__ == '__main__':
     system = platform.system().lower()
     if system == 'linux':
         # Ubuntu/Linux 系统使用共享目录
-        filepath = Path("/mnt/win_share/github/openyixi/social-auto-upload/videos")
+        filepath = Path("../social-auto-upload/videos")
     else:
         # Windows 系统使用相对路径
         filepath = Path(BASE_DIR) / "videos"

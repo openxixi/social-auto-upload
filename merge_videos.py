@@ -119,6 +119,9 @@ def get_video_info(video_path):
                     'codec': video_stream.get('codec_name', 'h264'),
                 }
                 
+                # 打印视频信息用于调试
+                logger.info(f"视频信息: {info['width']}x{info['height']}, {info['fps']}fps, 码率:{info['bit_rate']/1000}kbps")
+                
                 if audio_stream:
                     info['audio_bit_rate'] = int(audio_stream.get('bit_rate', 192000))
                     info['audio_sample_rate'] = int(audio_stream.get('sample_rate', 44100))
@@ -134,7 +137,7 @@ def get_video_info(video_path):
         return None
 
 
-def concat_videos(videos, output, cover=None, cover_duration=3, resolution="auto"):
+def concat_videos(videos, output, cover=None, cover_duration=3, resolution="auto", fit_mode="pad"):
     """
     方式1: 前后拼接多个视频（简单连接）
     如果提供封面，则按照 封面 -> video1 -> video2 -> ... 的顺序拼接
@@ -159,15 +162,18 @@ def concat_videos(videos, output, cover=None, cover_duration=3, resolution="auto
         video_info = get_video_info(videos[0])
         
         if not video_info:
-            logger.error("无法获取视频信息，使用默认参数")
+            logger.warning("⚠️ 无法获取视频信息，使用高质量默认参数")
             video_info = {
                 'width': 1920,
                 'height': 1080,
                 'fps': 25,
-                'bit_rate': 5000000,
+                'bit_rate': 8000000,    # 提高到 8000kbps
                 'audio_bit_rate': 192000,
                 'audio_sample_rate': 44100
             }
+            logger.info(f"默认参数: 码率 8000kbps")
+        else:
+            logger.info(f"✓ 成功获取视频信息: 码率 {video_info['bit_rate']/1000}kbps")
         
         # 如果指定了分辨率，使用指定的；否则使用第一个视频的
         if resolution == "auto":
@@ -186,6 +192,16 @@ def concat_videos(videos, output, cover=None, cover_duration=3, resolution="auto
         audio_sample_rate = video_info['audio_sample_rate']
         
         logger.info(f"视频参数: {target_width}x{target_height}, {target_fps}fps, 视频码率:{video_bitrate}k, 音频码率:{audio_bitrate}k")
+        logger.info(f"填充模式: {fit_mode} ({'裁剪填满' if fit_mode == 'crop' else '添加黑边'})")
+        
+        # 根据fit_mode选择滤镜
+        if fit_mode == "crop":
+            # 裁剪模式：放大到能覆盖目标尺寸，然后从中心裁剪
+            # 明确指定裁剪坐标确保在所有FFmpeg版本中都居中裁剪
+            fit_filter = f"scale={target_resolution}:force_original_aspect_ratio=increase,crop={target_resolution}:(in_w-{target_width})/2:(in_h-{target_height})/2"
+        else:
+            # pad模式：缩小到能装入目标尺寸，然后填充黑边
+            fit_filter = f"scale={target_resolution}:force_original_aspect_ratio=decrease,pad={target_resolution}:(ow-iw)/2:(oh-ih)/2"
         
         # 获取所有视频的音量，用于音量匹配
         logger.info("正在分析视频音量...")
@@ -230,7 +246,7 @@ def concat_videos(videos, output, cover=None, cover_duration=3, resolution="auto
             logger.info(f"正在处理封面（显示{cover_duration}秒）...")
             temp_cover_video = "temp_cover_with_audio.mp4"
             
-            # 将封面图片转换为有静音音频的视频
+            # 将封面图片转换为有静音音频的视频（使用高码率）
             cmd_cover = [
                 'ffmpeg',
                 '-loop', '1',
@@ -240,10 +256,12 @@ def concat_videos(videos, output, cover=None, cover_duration=3, resolution="auto
                 '-c:v', 'libx264',
                 '-t', str(cover_duration),
                 '-c:a', 'aac',
+                '-b:v', f'{video_bitrate}k',    # 使用与原视频相同的码率
+                '-b:a', f'{audio_bitrate}k',    # 使用与原视频相同的音频码率
                 '-shortest',
                 '-pix_fmt', 'yuv420p',
                 '-r', str(target_fps),
-                '-vf', f'scale={target_resolution}:force_original_aspect_ratio=increase,crop={target_resolution}',
+                '-vf', fit_filter,
                 '-y',
                 temp_cover_video
             ]
@@ -264,8 +282,8 @@ def concat_videos(videos, output, cover=None, cover_duration=3, resolution="auto
         # 添加所有视频
         for i, video in enumerate(videos):
             inputs.extend(['-i', video])
-            # 将视频缩放并裁剪到指定尺寸（填满屏幕）
-            scale_filters.append(f'[{n}:v]scale={target_resolution}:force_original_aspect_ratio=increase,crop={target_resolution},setsar=1,fps={target_fps}[v{n}]')
+            # 将视频缩放到指定尺寸（根据fit_mode选择pad或crop）
+            scale_filters.append(f'[{n}:v]{fit_filter},setsar=1,fps={target_fps}[v{n}]')
             # 调整视频的音量（如果需要）
             if abs(volume_adjustments[i]) > 0.5:  # 只有差异大于0.5dB时才调整
                 audio_filters.append(f'[{n}:a]volume={volume_adjustments[i]}dB[a{n}]')
@@ -286,21 +304,20 @@ def concat_videos(videos, output, cover=None, cover_duration=3, resolution="auto
             '-filter_complex', filter_complex,
             '-map', '[outv]',
             '-map', '[outa]',
-            # 视频编码参数
+            # 视频编码参数 - 使用原视频码率保证质量
             '-c:v', 'libx264',
-            '-preset', 'slow',           # 编码速度：slow 质量更好
-            '-crf', '18',                # 质量因子：18 高质量
-            '-b:v', f'{video_bitrate}k', # 使用第一个视频的码率
-            '-maxrate', f'{int(video_bitrate * 1.5)}k',
-            '-bufsize', f'{int(video_bitrate * 2)}k',
+            '-preset', 'medium',
+            '-b:v', f'{video_bitrate}k',        # 使用第一个视频的码率
+            '-maxrate', f'{int(video_bitrate * 1.3)}k',  # 最大码率
+            '-bufsize', f'{int(video_bitrate * 2)}k',     # 缓冲区大小
+            '-pix_fmt', 'yuv420p',
             '-profile:v', 'high',
             '-level', '4.1',
-            '-pix_fmt', 'yuv420p',
-            '-r', str(target_fps),       # 使用第一个视频的帧率
+            '-r', str(target_fps),              # 使用第一个视频的帧率
             # 音频编码参数
             '-c:a', 'aac',
-            '-b:a', f'{audio_bitrate}k', # 使用第一个视频的音频码率
-            '-ar', str(audio_sample_rate), # 使用第一个视频的采样率
+            '-b:a', f'{audio_bitrate}k',        # 使用第一个视频的音频码率
+            '-ar', str(audio_sample_rate),       # 使用第一个视频的采样率
             # 色彩空间和元数据
             '-colorspace', 'bt709',
             '-color_primaries', 'bt709',
@@ -642,6 +659,12 @@ def main():
                         default="auto",
                         help="输出视频分辨率（auto=使用第一个视频的分辨率(默认), 1920x1080=1080p横屏, 1080x1920=1080p竖屏, 1280x720=720p, 3840x2160=4K）")
     
+    # 填充模式参数
+    parser.add_argument("--fit-mode", "-f",
+                        choices=["pad", "crop"],
+                        default="pad",
+                        help="视频适配模式（默认: pad添加黑边保留完整内容, crop=裁剪填满适合抖音全屏）")
+    
     args = parser.parse_args()
     
     # 检查输入文件
@@ -677,7 +700,7 @@ def main():
     if args.mode == "concat":
         # concat模式支持多个视频和直接添加封面
         success = concat_videos(args.videos, args.output, 
-                               args.cover, args.cover_duration, args.resolution)
+                               args.cover, args.cover_duration, args.resolution, args.fit_mode)
     elif args.mode in ["side", "stack", "pip", "blend", "crossfade"]:
         # 其他模式仅支持2个视频
         if len(args.videos) != 2:

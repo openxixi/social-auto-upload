@@ -32,12 +32,24 @@ def add_date_to_image(image_path, output_path=None, date_format="%Y年%m月%d日
     font_size = int(height * 0.025)  # 字体大小为图片高度的2.5%（适配底部小字）
     
     try:
-        # 尝试使用系统中文字体
-        font_paths = [
-            "C:/Windows/Fonts/msyh.ttc",  # 微软雅黑
-            "C:/Windows/Fonts/simhei.ttf",  # 黑体
-            "C:/Windows/Fonts/simsun.ttc",  # 宋体
-        ]
+        # 根据操作系统选择字体路径
+        import platform
+        
+        if platform.system() == 'Windows':
+            font_paths = [
+                "C:/Windows/Fonts/msyh.ttc",  # 微软雅黑
+                "C:/Windows/Fonts/simhei.ttf",  # 黑体
+                "C:/Windows/Fonts/simsun.ttc",  # 宋体
+            ]
+        else:  # Linux/Mac
+            font_paths = [
+                "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",  # 文泉驿正黑
+                "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",  # 文泉驿微米黑
+                "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",  # Droid
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # 思源黑体
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",  # Liberation
+                "/System/Library/Fonts/PingFang.ttc",  # macOS 苹方
+            ]
         
         font = None
         for font_path in font_paths:
@@ -48,6 +60,7 @@ def add_date_to_image(image_path, output_path=None, date_format="%Y年%m月%d日
         
         if font is None:
             print("警告: 未找到中文字体，使用默认字体")
+            print("Linux 用户请安装字体: sudo apt-get install fonts-wqy-zenhei fonts-wqy-microhei")
             font = ImageFont.load_default()
     except Exception as e:
         print(f"加载字体失败: {e}，使用默认字体")
