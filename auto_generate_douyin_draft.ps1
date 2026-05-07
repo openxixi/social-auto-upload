@@ -135,11 +135,12 @@ Write-Host ""
 
 # 等待服务启动并每 20 秒检查一次
 Write-Host "等待服务启动完成..." -ForegroundColor Yellow
-Write-Host "提示: AI 服务需要加载模型，可能需要 2-3 分钟" -ForegroundColor Cyan
-Write-Host "提示: 可以查看弹出的命令窗口观察启动进度`n" -ForegroundColor Cyan
+Write-Host "提示: AI 服务需要加载模型，可能需要 3-5 分钟" -ForegroundColor Cyan
+Write-Host "提示: 可以查看弹出的命令窗口观察启动进度" -ForegroundColor Cyan
+Write-Host "提示: 如果服务窗口显示错误，请按 Ctrl+C 终止脚本`n" -ForegroundColor Yellow
 
-$totalWaitTime = 120  # 增加到 180 秒（3分钟）
-$checkInterval = 20
+$totalWaitTime = 300  # 增加到 300 秒（5分钟）
+$checkInterval = 15
 $elapsed = 0
 
 while ($elapsed -lt $totalWaitTime) {
@@ -150,10 +151,26 @@ while ($elapsed -lt $totalWaitTime) {
     $port7860Status = Get-NetTCPConnection -LocalPort 7860 -State Listen -ErrorAction SilentlyContinue
     $port7866Status = Get-NetTCPConnection -LocalPort 7866 -State Listen -ErrorAction SilentlyContinue
     
-    $port7860Ready = if ($port7860Status) { "✓ 就绪" } else { "⏳ 等待中" }
-    $port7866Ready = if ($port7866Status) { "✓ 就绪" } else { "⏳ 等待中" }
+    # 检查进程是否还在运行
+    $process1Running = if ($null -ne $script:process1) { -not $script:process1.HasExited } else { $false }
+    $process2Running = if ($null -ne $script:process2) { -not $script:process2.HasExited } else { $false }
+    
+    $port7860Ready = if ($port7860Status) { "✓ 就绪" } else { if ($process2Running) { "⏳ 加载中" } else { "✗ 进程已退出" } }
+    $port7866Ready = if ($port7866Status) { "✓ 就绪" } else { if ($process1Running) { "⏳ 加载中" } else { "✗ 进程已退出" } }
     
     Write-Host "  [$elapsed/$totalWaitTime 秒] 端口 7860 (InfiniteTalk): $port7860Ready | 端口 7866 (index-tts2): $port7866Ready" -ForegroundColor Cyan
+    
+    # 如果进程退出了，立即报错
+    if (-not $process1Running -and -not $port7866Status) {
+        Write-Host "`n✗ 错误: index-tts2 进程已退出！" -ForegroundColor Red
+        Write-Host "  请检查服务窗口的错误信息" -ForegroundColor Yellow
+        break
+    }
+    if (-not $process2Running -and -not $port7860Status) {
+        Write-Host "`n✗ 错误: InfiniteTalk 进程已退出！" -ForegroundColor Red
+        Write-Host "  请检查服务窗口的错误信息" -ForegroundColor Yellow
+        break
+    }
     
     # 如果两个端口都已监听，提前退出等待
     if ($port7860Status -and $port7866Status) {
@@ -168,25 +185,51 @@ Write-Host "验证服务状态..." -ForegroundColor Cyan
 $port7860Final = Get-NetTCPConnection -LocalPort 7860 -State Listen -ErrorAction SilentlyContinue
 $port7866Final = Get-NetTCPConnection -LocalPort 7866 -State Listen -ErrorAction SilentlyContinue
 
+$servicesReady = $true
+
 if ($port7860Final) {
     Write-Host "✓ 端口 7860 (InfiniteTalk) 已就绪" -ForegroundColor Green
 } else {
-    Write-Host "⚠ 警告: 端口 7860 (InfiniteTalk) 未监听" -ForegroundColor Yellow
-    Write-Host "  提示: 数字人视频生成可能会失败，请检查服务窗口的错误信息" -ForegroundColor Gray
+    Write-Host "✗ 端口 7860 (InfiniteTalk) 未监听" -ForegroundColor Red
+    Write-Host "  提示: 数字人视频生成将会失败" -ForegroundColor Yellow
+    $servicesReady = $false
+    
+    # 检查进程是否还在运行
+    if ($null -ne $script:process2 -and -not $script:process2.HasExited) {
+        Write-Host "  进程仍在运行但未监听端口，可能还在加载中" -ForegroundColor Yellow
+    } else {
+        Write-Host "  进程已退出，请检查服务窗口的错误信息" -ForegroundColor Red
+    }
 }
 
 if ($port7866Final) {
     Write-Host "✓ 端口 7866 (index-tts2) 已就绪" -ForegroundColor Green
 } else {
-    Write-Host "⚠ 警告: 端口 7866 (index-tts2) 未监听" -ForegroundColor Yellow
-    Write-Host "  提示: TTS 语音生成可能会失败，请检查服务窗口的错误信息" -ForegroundColor Gray
+    Write-Host "✗ 端口 7866 (index-tts2) 未监听" -ForegroundColor Red
+    Write-Host "  提示: TTS 语音生成将会失败" -ForegroundColor Yellow
+    $servicesReady = $false
+    
+    # 检查进程是否还在运行
+    if ($null -ne $script:process1 -and -not $script:process1.HasExited) {
+        Write-Host "  进程仍在运行但未监听端口，可能还在加载中" -ForegroundColor Yellow
+    } else {
+        Write-Host "  进程已退出，请检查服务窗口的错误信息" -ForegroundColor Red
+    }
 }
 
-# 如果所有服务都未就绪，询问是否继续
-if (-not $port7860Final -and -not $port7866Final) {
-    Write-Host "`n⚠ 两个服务都未就绪！" -ForegroundColor Red
-    Write-Host "建议: 检查服务窗口，确认是否有错误信息" -ForegroundColor Yellow
-    Write-Host "      如果服务正在加载模型，可以等待更长时间" -ForegroundColor Yellow
+# 如果关键服务未就绪，停止执行
+if (-not $servicesReady) {
+    Write-Host "`n✗ 必需的服务未就绪，无法继续执行" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "故障排查建议:" -ForegroundColor Yellow
+    Write-Host "  1. 检查服务窗口是否有错误信息" -ForegroundColor Gray
+    Write-Host "  2. 确认 GPU 驱动和 CUDA 环境正常" -ForegroundColor Gray
+    Write-Host "  3. 确认模型文件完整且路径正确" -ForegroundColor Gray
+    Write-Host "  4. 尝试手动启动服务进行测试" -ForegroundColor Gray
+    Write-Host "  5. 如果是显存不足，可以尝试重启电脑后再运行" -ForegroundColor Gray
+    Write-Host ""
+    Clean-Services
+    exit 1
 }
 
 Write-Host ""
@@ -329,13 +372,17 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "✓ 步骤4完成" -ForegroundColor Green
 Write-Host ""
 
+# 步骤5: 关闭后台服务
+Write-Host "============================================================"
+Write-Host "步骤5: 关闭后台服务"
+Write-Host "============================================================"
+Clean-Services
+Write-Host "✓ 步骤5完成" -ForegroundColor Green
+Write-Host ""
+
 Write-Host "============================================================"
 Write-Host "所有步骤已完成!"
 Write-Host "结束时间: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
 Write-Host "============================================================"
-Write-Host ""
-
-# 清理后台服务
-Clean-Services
 
 Write-Host "✓ 流程执行完毕" -ForegroundColor Green

@@ -22,7 +22,7 @@ python .\workflow.py "D:\video_workspace\source_txt\0_年月日.txt" "D:\video_w
 .\auto_generate_douyin_draft.ps1 -TextFile "D:\custom\my_text.txt"
 
 # 自定义所有参数
-.\auto_generate_douyin_draft.ps1 -TextFile "D:\texts\content.txt" -AudioFile "D:\audio\voice.m4a" -ImageFile "D:\images\avatar.png" -Prompt "女人在讲解"
+.\auto_generate_douyin_draft.ps1 -TextFile "D:\texts\content.txt" -AudioFile "D:\audio\voice.m4a" -ImageFile "D:\images\avatar.png" -Prompt "男人正在说话"
 ```
 
 **参数说明：**

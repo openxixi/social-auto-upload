@@ -94,43 +94,122 @@ def automate_tts(text_file_path, audio_file_path, output_dir, url="http://localh
 
             # Wait for page to load
             page.wait_for_load_state('networkidle')
+            
+            # Wait for Gradio app to initialize (Gradio 5.x uses web components)
+            print("等待 Gradio 界面加载...")
+            try:
+                page.wait_for_selector("gradio-app", timeout=10000)
+                # Give Gradio time to render its components
+                page.wait_for_timeout(2000)
+            except Exception as e:
+                print(f"⚠ Gradio app 元素未找到，尝试继续: {e}")
 
-            # Find and fill text input
-            textarea = page.wait_for_selector("textarea")
+            # Find and fill text input - try multiple selectors for compatibility
+            print("查找文本输入框...")
+            textarea = None
+            selectors = [
+                "textarea",  # Standard textarea
+                "gradio-app textarea",  # Textarea within gradio-app
+                "label:has-text('文本') textarea",  # Textarea with label "文本"
+                "[data-testid='textbox'] textarea",  # Gradio textbox component
+            ]
+            
+            for selector in selectors:
+                try:
+                    print(f"  尝试选择器: {selector}")
+                    textarea = page.wait_for_selector(selector, timeout=10000, state='visible')
+                    if textarea:
+                        print(f"  ✓ 成功找到文本输入框")
+                        break
+                except Exception as e:
+                    print(f"  ✗ 未找到: {e}")
+                    continue
+            
+            if not textarea:
+                print(f"✗ 无法找到文本输入框。请检查 TTS 服务是否正常运行在 {url}")
+                # Save page screenshot for debugging
+                screenshot_path = os.path.join(output_dir, "debug_page.png")
+                page.screenshot(path=screenshot_path)
+                print(f"  页面截图已保存至: {screenshot_path}")
+                # Save page HTML for debugging
+                html_path = os.path.join(output_dir, "debug_page.html")
+                with open(html_path, 'w', encoding='utf-8') as f:
+                    f.write(page.content())
+                print(f"  页面 HTML 已保存至: {html_path}")
+                raise Exception("无法找到文本输入框")
+            
+            print("填充文本内容...")
             textarea.fill(text)
+            print(f"✓ 文本已填充 ({len(text)} 个字符)")
 
             # Find and upload audio file
-            audio_input = page.locator("#component-4 input[type='file']")
-            if audio_input.count() > 0:
-                audio_input.set_input_files(os.path.abspath(audio_file_path))
-            else:
-                # Fallback: try file chooser by clicking upload button
-                upload_button = page.locator("#component-4 button[aria-label='Upload file']")
-                if upload_button.count() == 0:
-                    upload_button = page.locator("#component-4 button:has(svg)").first
-                with page.expect_file_chooser() as fc_info:
-                    upload_button.click()
-                file_chooser = fc_info.value
-                file_chooser.set_files(os.path.abspath(audio_file_path))
-            print("\r\n")
-            print(audio_file_path)
-            print("before audio file")
-            print(os.path.abspath(audio_file_path))
-            time.sleep(5)  # Wait for upload to complete
-            print("after audio file")
-            # Debug: print all buttons
-            buttons = page.locator("button")
-            print("All buttons found:")
-            for i in range(buttons.count()):
-                print(f"Button {i}: '{buttons.nth(i).inner_text()}'")
+            print("上传音色参考音频...")
+            audio_uploaded = False
+            
+            # Try different selectors for audio input
+            audio_selectors = [
+                "label:has-text('音色参考音频') input[type='file']",  # By label text
+                "#component-4 input[type='file']",  # By component ID
+                "input[type='file']",  # Any file input
+            ]
+            
+            for selector in audio_selectors:
+                try:
+                    print(f"  尝试音频上传选择器: {selector}")
+                    audio_input = page.locator(selector).first
+                    if audio_input.count() > 0:
+                        audio_input.set_input_files(os.path.abspath(audio_file_path))
+                        audio_uploaded = True
+                        print(f"  ✓ 音频文件已上传: {os.path.basename(audio_file_path)}")
+                        break
+                except Exception as e:
+                    print(f"  ✗ 上传失败: {e}")
+                    continue
+            
+            if not audio_uploaded:
+                raise Exception(f"无法上传音频文件: {audio_file_path}")
+            
+            print("等待音频上传完成...")
+            time.sleep(3)  # Wait for upload to complete
 
             # Click generate button
-            generate_button = page.locator("button:has-text('生成语音')").first
-            if not generate_button.is_enabled():
-                print("⚠ 生成语音按钮不可用，可能上传尚未完成")
-            gen_start = datetime.now()
-            print(f"生成开始时间: {gen_start.strftime('%Y-%m-%d %H:%M:%S')}")
-            generate_button.click(force=True)
+            print("查找生成按钮...")
+            generate_clicked = False
+            button_selectors = [
+                "button:has-text('生成语音')",  # By button text
+                "#component-7",  # By component ID from HTML
+                "button[variant='primary']",  # Primary button
+            ]
+            
+            for selector in button_selectors:
+                try:
+                    print(f"  尝试按钮选择器: {selector}")
+                    generate_button = page.locator(selector).first
+                    if generate_button.count() > 0:
+                        if not generate_button.is_enabled():
+                            print("  ⚠ 生成语音按钮不可用，继续等待...")
+                            page.wait_for_timeout(2000)
+                        gen_start = datetime.now()
+                        print(f"生成开始时间: {gen_start.strftime('%Y-%m-%d %H:%M:%S')}")
+                        generate_button.click(force=True)
+                        generate_clicked = True
+                        print("  ✓ 已点击生成按钮")
+                        break
+                except Exception as e:
+                    print(f"  ✗ 点击失败: {e}")
+                    continue
+            
+            if not generate_clicked:
+                # Debug: print all buttons
+                buttons = page.locator("button")
+                print("可用按钮列表:")
+                for i in range(min(buttons.count(), 20)):
+                    try:
+                        btn_text = buttons.nth(i).inner_text()
+                        print(f"  按钮 {i}: '{btn_text}'")
+                    except:
+                        pass
+                raise Exception("无法找到生成语音按钮")
 
             # Wait for output audio or download link to appear with progress
             max_wait_sec = 600
