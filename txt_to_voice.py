@@ -99,8 +99,9 @@ def automate_tts(text_file_path, audio_file_path, output_dir, url="http://localh
             print("等待 Gradio 界面加载...")
             try:
                 page.wait_for_selector("gradio-app", timeout=10000)
-                # Give Gradio time to render its components
-                page.wait_for_timeout(2000)
+                # Give Gradio more time to render its Shadow DOM components
+                print("  等待 Gradio 渲染 Shadow DOM...")
+                page.wait_for_timeout(5000)  # Increased from 2s to 5s
             except Exception as e:
                 print(f"⚠ Gradio app 元素未找到，尝试继续: {e}")
 
@@ -108,17 +109,22 @@ def automate_tts(text_file_path, audio_file_path, output_dir, url="http://localh
             print("查找文本输入框...")
             textarea = None
             selectors = [
-                "textarea",  # Standard textarea
-                "gradio-app textarea",  # Textarea within gradio-app
-                "label:has-text('文本') textarea",  # Textarea with label "文本"
+                "textarea[placeholder*='请输入']",  # Textarea with placeholder containing "请输入"
+                "textarea[placeholder*='文本']",    # Textarea with placeholder containing "文本"
+                "textarea",  # Any textarea
+                "label:has-text('文本') + * textarea",  # Textarea after label "文本"
                 "[data-testid='textbox'] textarea",  # Gradio textbox component
             ]
             
             for selector in selectors:
                 try:
                     print(f"  尝试选择器: {selector}")
-                    textarea = page.wait_for_selector(selector, timeout=10000, state='visible')
-                    if textarea:
+                    # Use locator with more flexible approach
+                    locator = page.locator(selector).first
+                    # Wait for element to be visible and attached
+                    locator.wait_for(state='visible', timeout=15000)
+                    if locator.is_visible():
+                        textarea = locator
                         print(f"  ✓ 成功找到文本输入框")
                         break
                 except Exception as e:
@@ -127,15 +133,27 @@ def automate_tts(text_file_path, audio_file_path, output_dir, url="http://localh
             
             if not textarea:
                 print(f"✗ 无法找到文本输入框。请检查 TTS 服务是否正常运行在 {url}")
+                print("  正在保存调试信息...")
+                # Wait a bit more before taking screenshot
+                page.wait_for_timeout(3000)
                 # Save page screenshot for debugging
                 screenshot_path = os.path.join(output_dir, "debug_page.png")
-                page.screenshot(path=screenshot_path)
+                page.screenshot(path=screenshot_path, full_page=True)
                 print(f"  页面截图已保存至: {screenshot_path}")
                 # Save page HTML for debugging
                 html_path = os.path.join(output_dir, "debug_page.html")
                 with open(html_path, 'w', encoding='utf-8') as f:
                     f.write(page.content())
                 print(f"  页面 HTML 已保存至: {html_path}")
+                # Try to list all textareas for debugging
+                all_textareas = page.locator("textarea").all()
+                print(f"  页面上共找到 {len(all_textareas)} 个 textarea 元素")
+                for i, ta in enumerate(all_textareas[:5]):  # Show first 5
+                    try:
+                        placeholder = ta.get_attribute("placeholder") or ""
+                        print(f"    textarea[{i}]: placeholder='{placeholder}'")
+                    except:
+                        print(f"    textarea[{i}]: (无法获取属性)")
                 raise Exception("无法找到文本输入框")
             
             print("填充文本内容...")

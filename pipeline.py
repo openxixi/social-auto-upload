@@ -13,6 +13,13 @@ import re
 import subprocess
 from pathlib import Path
 import logging
+import random
+
+# 设置标准输出编码为 UTF-8，解决 Windows 控制台编码问题
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 import time
 from datetime import datetime, timedelta
 
@@ -178,17 +185,21 @@ def move_files_from_folder(folder_path):
         return False
 
 
-def process_videos():
+def process_videos(folder_num=None, is_first_run=False):
     """
     步骤3: 处理视频和图片
     - 为图片添加日期
     - 为视频添加日期尾部
     
+    Args:
+        folder_num: 文件夹编号（从文件夹名中提取的数字）
+        is_first_run: 是否是第一次运行（影响视频增强参数）
+    
     Returns:
         成功返回 True，失败返回 False
     """
     logger.info("=" * 60)
-    logger.info("步骤3: 处理视频和图片")
+    logger.info(f"步骤3: 处理视频和图片 (文件夹编号: {folder_num})")
     logger.info("=" * 60)
     
     # 确保 videos 目录存在
@@ -202,6 +213,8 @@ def process_videos():
             ['python', 'add_date_to_image.py', './videos_pre/tmp.jpg', '-o', './videos/tmp.jpg'],
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             check=True
         )
         logger.info("✓ 图片处理完成")
@@ -215,16 +228,41 @@ def process_videos():
     except Exception as e:
         logger.error(f"✗ 图片处理异常: {e}")
         return False
-    
+    try:
+        # text 是位置参数，需要放在 image 之后，-o 之前
+        result = subprocess.run(
+            ['python', 'add_txt_to_image.py', './videos/tmp.jpg', 
+             f"第{folder_num}集" if folder_num is not None else "第0集",
+             '-o', './videos/tmp.jpg'],
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            check=True
+        )
+        logger.info("✓ 图片添加集数完成")
+        if result.stdout:
+            for line in result.stdout.strip().split('\n'):
+                logger.info(f"  {line}")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"✗ 图片添加集数失败: {e}")
+        logger.error(f"错误信息: {e.stderr}")
+        return False
+    except Exception as e:
+        logger.error(f"✗ 图片添加集数异常: {e}")
+        return False
+
     # 3.2 为视频添加日期尾部
     logger.info("3.2 为视频添加日期尾部...")
     try:
         result = subprocess.run(
             ['python', './auto_add_tail_to_videos.py', './videos_pre/tmp.mp4', 
-             '-c', './videos/tmp.jpg', '-o', './videos/tmp.mp4',
+             '-c', './videos/tmp.jpg', '-o', './videos_pre/tmp_raw.mp4',  # 先输出为 tmp_raw.mp4 20260513
              ],  # 抖音竖屏全屏
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             check=True
         )
         logger.info("✓ 视频处理完成（抖音竖屏全屏）")
@@ -238,6 +276,61 @@ def process_videos():
     except Exception as e:
         logger.error(f"✗ 视频处理异常: {e}")
         return False
+    
+    # 3.3 增强视频（添加背景音乐、文字水印、滤镜、速度、缩放等，提高原创性）
+    logger.info("3.3 增强视频（提高原创性）...")
+    
+    # 第一次运行时使用默认参数，之后使用随机参数
+    if is_first_run:
+        # 第一次：不使用增强参数，只添加音乐和水印
+        logger.info("  第一次运行，使用默认参数（仅音乐+水印）")
+        cmd = [
+            'python', 'enhance_video.py', './videos_pre/tmp_raw.mp4', 
+            '-o', './videos/tmp.mp4',
+            '--music-dir', './bgm',
+            '--volume', '0.12'  # 背景音乐音量 12%
+        ]
+    else:
+        # 之后运行：使用随机参数
+        filter_types = ['vintage', 'vibrant', 'cool', 'warm', 'sharp', 'soft', 'bright', 'contrast', 'cinematic']
+        random_filter = random.choice(filter_types)
+        random_speed = round(random.uniform(0.95, 1.05), 3)  # 0.95-1.05 之间
+        random_zoom = round(random.uniform(0.0005, 0.002), 4)  # 0.0005-0.002 之间
+        
+        logger.info(f"  随机参数: filter={random_filter}, speed={random_speed}, zoom={random_zoom}")
+        
+        cmd = [
+            'python', 'enhance_video.py', './videos/tmp_raw.mp4', 
+            '-o', './videos/tmp.mp4',
+            '--add-filter', '--filter', random_filter,
+            '--speed', str(random_speed),
+            '--add-zoom', '--zoom-factor', str(random_zoom),
+            '--music-dir', './bgm',
+            '--volume', '0.12'  # 背景音乐音量 12%
+        ]
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            check=True
+        )
+        logger.info("✓ 视频增强完成")
+        if result.stdout:
+            for line in result.stdout.strip().split('\n')[-5:]:
+                logger.info(f"  {line}")
+    except subprocess.CalledProcessError as e:
+        logger.warning(f"⚠ 视频增强失败，使用原视频: {e}")
+        # 如果增强失败，使用未增强的视频
+        import shutil
+        shutil.copy2('./videos/tmp_raw.mp4', './videos/tmp.mp4')
+    except Exception as e:
+        logger.warning(f"⚠ 视频增强异常，使用原视频: {e}")
+        import shutil
+        shutil.copy2('./videos/tmp_raw.mp4', './videos/tmp.mp4')
     
     return True
 
@@ -255,9 +348,11 @@ def upload_to_douyin():
     
     try:
         result = subprocess.run(
-            ['python', 'run_upload_all_douyin.py'],
+            ['python', 'upload_video_to_douyin.py'],
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             check=True
         )
         logger.info("✓ 视频上传完成")
@@ -324,7 +419,9 @@ def main():
         return 1
     
     # 步骤3: 处理视频和图片
-    success = process_videos()
+    # 判断是否是第一次运行：current_index == max_index 说明是首次运行
+    is_first_run = (current_index == max_index)
+    success = process_videos(folder_num, is_first_run)
     
     if not success:
         logger.error("=" * 60)

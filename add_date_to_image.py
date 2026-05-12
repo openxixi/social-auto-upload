@@ -4,6 +4,12 @@ from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 import argparse
 
+# 设置标准输出编码为 UTF-8，解决 Windows 控制台编码问题
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 def add_date_to_image(image_path, output_path=None, date_format="%Y年%m月%d日"):
     """
     在图片上添加当天日期
@@ -29,7 +35,7 @@ def add_date_to_image(image_path, output_path=None, date_format="%Y年%m月%d日
     draw = ImageDraw.Draw(image)
     
     # 设置字体和大小
-    font_size = int(height * 0.025)  # 字体大小为图片高度的2.5%（适配底部小字）
+    font_size = int(height * 0.035)  # 字体大小为图片高度的3.5%（适配底部小字）
     
     try:
         # 根据操作系统选择字体路径
@@ -80,7 +86,7 @@ def add_date_to_image(image_path, output_path=None, date_format="%Y年%m月%d日
     # 添加文字阴影/描边效果，增强可读性
     shadow_color = "black"
     text_color = "white"  # 白色字体
-    shadow_offset = 2
+    shadow_offset = 3
     
     # 绘制阴影（四个方向）
     for offset_x, offset_y in [(-shadow_offset, -shadow_offset), 

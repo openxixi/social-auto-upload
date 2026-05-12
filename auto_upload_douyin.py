@@ -3,6 +3,12 @@ import sys
 import os
 from datetime import datetime
 
+# 设置标准输出编码为 UTF-8，解决 Windows 控制台编码问题
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 def run_command(command, description):
     """
     执行命令并检查结果
@@ -22,9 +28,9 @@ def run_command(command, description):
     
     try:
         if isinstance(command, str):
-            result = subprocess.run(command, shell=True, check=True, encoding='utf-8')
+            result = subprocess.run(command, shell=True, check=True, encoding='utf-8', errors='replace')
         else:
-            result = subprocess.run(command, check=True, encoding='utf-8')
+            result = subprocess.run(command, check=True, encoding='utf-8', errors='replace')
         
         print(f"\n✓ {description} - 成功完成")
         return True
