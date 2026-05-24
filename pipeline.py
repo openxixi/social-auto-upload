@@ -36,11 +36,8 @@ VIDEOS_PRE_DIR = "./videos_pre"
 
 
 def get_source_dir():
-    """根据操作系统获取源目录"""
-    if platform.system() == 'Windows':
-        return r'D:\video_workspace\jianying_output'
-    else:  # Linux
-        return '/mnt/d/video_workspace/jianying_output'
+    """获取源目录（当前目录下的jianying_output）"""
+    return './jianying_output'
 
 
 def load_current_index(max_index=None):

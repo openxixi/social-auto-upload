@@ -1,6 +1,7 @@
 # IDE and config directories
 .github/
 .vscode/
+jianying_output/
 pipeline_index.txt
 # Byte-compiled / optimized / DLL files
 __pycache__/
