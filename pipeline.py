@@ -297,7 +297,7 @@ def process_videos(folder_num=None, is_first_run=False):
         logger.info(f"  随机参数: filter={random_filter}, speed={random_speed}, zoom={random_zoom}")
         
         cmd = [
-            'python', 'enhance_video.py', './videos/tmp_raw.mp4', 
+            'python', 'enhance_video.py', './videos_pre/tmp_raw.mp4', 
             '-o', './videos/tmp.mp4',
             '--add-filter', '--filter', random_filter,
             '--speed', str(random_speed),
